@@ -99,60 +99,78 @@ export async function generateContractText(params: {
   const { COMMERCIAL_CONTRACT_TEMPLATE, PRIVATE_CONTRACT_TEMPLATE } = await import("@/lib/contract-templates");
 
   // חקיקת נכסים = חוזה עסקי, חקיקת פרטי = חוזה פרטי
-  const isCommercial = params.entity_name ? params.entity_name.includes("נכסים") : true;
+  const entityStr = String(params.entity_name || "").toLowerCase();
+  const isPrivate = entityStr.includes("פרטי");
+  const isCommercial = !isPrivate;
   const template = isCommercial ? COMMERCIAL_CONTRACT_TEMPLATE : PRIVATE_CONTRACT_TEMPLATE;
 
   const extraInstructions = params.ai_instructions
     ? `\n\nהוראות נוספות מהמשכיר (שלב אותן בחוזה כסעיפים נוספים):\n${params.ai_instructions}`
     : "";
 
-  const prompt = `אתה מקבל תבנית חוזה שכירות ${isCommercial ? "עסקי" : "פרטי"} של קבוצת חקיקת.
-מלא את התבנית עם הפרטים הבאים:
+  // Build replacement values
+  const today = new Date();
+  const dateStr = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
+  const startParts = params.start_date.split("-");
+  const endParts = params.end_date.split("-");
+  const startStr = `${startParts[2]}/${startParts[1]}/${startParts[0]}`;
+  const endStr = `${endParts[2]}/${endParts[1]}/${endParts[0]}`;
+  const months = Math.round((new Date(params.end_date).getTime() - new Date(params.start_date).getTime()) / (1000 * 60 * 60 * 24 * 30));
+  const durationStr = months >= 12 ? `${Math.round(months / 12)} שנים (${months} חודשים)` : `${months} חודשים`;
 
-- שם דייר (שוכר): ${params.tenant_name}
-- ת.ז שוכר: ${params.id_number}
-- יחידה: ${params.unit} ב${params.property}
-- תאריך התחלה: ${params.start_date}
-- תאריך סיום: ${params.end_date}
-- שכ"ד חודשי: ${params.monthly_rent} ₪
-- עלייה שנתית: ${params.annual_increase}%
-- ועד בית: ${params.building_fee} ₪
-- ארנונה: ${params.arnona} ₪${extraInstructions}
+  const arnonaClause = params.arnona > 0 ? `${params.arnona} ₪ תשלום ארנונה לכל חודש.` : "";
+  const buildingFeeClause = params.building_fee > 0 ? `${params.building_fee} ₪ תשלום וועד בית לכל חודש.` : "";
 
-הנה התבנית — מלא את כל השדות המסומנים ב-{{ }} והחזר חוזה מלא ומוכן:
+  // Do direct replacement first — no AI needed for simple fields
+  let filledContract = template
+    .replace(/\{\{DATE\}\}/g, dateStr)
+    .replace(/\{\{LANDLORD_NAME\}\}/g, isCommercial ? "חקיקת נכסים" : "שלמה חקיקת")
+    .replace(/\{\{LANDLORD_ID\}\}/g, isCommercial ? "064813116" : "022554521")
+    .replace(/\{\{TENANT_NAME\}\}/g, params.tenant_name)
+    .replace(/\{\{TENANT_ID\}\}/g, params.id_number)
+    .replace(/\{\{UNIT_DESCRIPTION\}\}/g, params.unit)
+    .replace(/\{\{PROPERTY_ADDRESS\}\}/g, params.property)
+    .replace(/\{\{CONTRACT_DURATION\}\}/g, durationStr)
+    .replace(/\{\{START_DATE\}\}/g, startStr)
+    .replace(/\{\{END_DATE\}\}/g, endStr)
+    .replace(/\{\{MONTHLY_RENT\}\}/g, String(params.monthly_rent))
+    .replace(/\{\{ARNONA_CLAUSE\}\}/g, arnonaClause)
+    .replace(/\{\{BUILDING_FEE_CLAUSE\}\}/g, buildingFeeClause)
+    .replace(/\{\{TOTAL_CHECKS\}\}/g, "12");
 
-${template}
+  // Handle additional clauses
+  if (params.ai_instructions) {
+    // Use AI only to generate the additional clauses text
+    const prompt = `אתה עורך דין ישראלי. כתוב סעיפים משפטיים קצרים בעברית עבור חוזה שכירות, על סמך ההוראות הבאות מהמשכיר:
 
-הנחיות:
-1. מלא את כל השדות המסומנים ב-{{ }} עם הפרטים שניתנו
-2. אם יש הוראות נוספות — הוסף אותן כסעיפים במקום {{ADDITIONAL_CLAUSES}}
-3. אם אין הוראות נוספות — הסר את {{ADDITIONAL_CLAUSES}}
-4. שמור על כל הסעיפים המקוריים של החוזה — אל תמחק ואל תשנה אותם
-5. החזר רק את טקסט החוזה המלא, ללא הסברים`;
+${params.ai_instructions}
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": getApiKey(),
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 4096,
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-    }),
-  });
+כתוב רק את הסעיפים עצמם, ללא הקדמה או הסבר. כל סעיף בשורה נפרדת.`;
 
-  if (!response.ok) {
-    throw new Error(`Claude API error: ${response.status}`);
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": getApiKey(),
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1024,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      const additionalText = result.content?.[0]?.text || "";
+      filledContract = filledContract.replace(/\{\{ADDITIONAL_CLAUSES\}\}/g, additionalText);
+    } else {
+      filledContract = filledContract.replace(/\{\{ADDITIONAL_CLAUSES\}\}/g, "");
+    }
+  } else {
+    filledContract = filledContract.replace(/\{\{ADDITIONAL_CLAUSES\}\}/g, "");
   }
 
-  const result = await response.json();
-  return result.content?.[0]?.text || "";
+  return filledContract;
 }

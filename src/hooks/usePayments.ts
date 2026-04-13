@@ -2,6 +2,76 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import type { Payment, PaymentSchedule } from "@/types/database";
 
+export function useMonthlySchedule(monthYear: string) {
+  return useQuery({
+    queryKey: ["payment_schedule", "monthly", monthYear],
+    queryFn: async () => {
+      if (!isSupabaseConfigured()) return [];
+
+      const { data, error } = await supabase
+        .from("payment_schedule")
+        .select(`
+          *,
+          tenant:tenants(*),
+          contract:contracts(
+            *,
+            unit:units(
+              *,
+              property:properties(*)
+            )
+          )
+        `)
+        .eq("month_year", monthYear)
+        .order("due_date", { ascending: true });
+
+      if (error) throw error;
+      return data as (PaymentSchedule & {
+        tenant: import("@/types/database").Tenant;
+        contract: import("@/types/database").Contract & {
+          unit: import("@/types/database").Unit & {
+            property: import("@/types/database").Property;
+          };
+        };
+      })[];
+    },
+  });
+}
+
+export function useOverdueSchedule() {
+  return useQuery({
+    queryKey: ["payment_schedule", "overdue"],
+    queryFn: async () => {
+      if (!isSupabaseConfigured()) return [];
+
+      const { data, error } = await supabase
+        .from("payment_schedule")
+        .select(`
+          *,
+          tenant:tenants(*),
+          contract:contracts(
+            *,
+            unit:units(
+              *,
+              property:properties(*)
+            )
+          )
+        `)
+        .eq("status", "overdue")
+        .order("due_date", { ascending: true });
+
+      if (error) throw error;
+      return data as (PaymentSchedule & {
+        tenant: import("@/types/database").Tenant;
+        contract: import("@/types/database").Contract & {
+          unit: import("@/types/database").Unit & {
+            property: import("@/types/database").Property;
+          };
+        };
+      })[];
+    },
+  });
+}
+
 export function usePaymentSchedule(contractId?: string, tenantId?: string) {
   return useQuery({
     queryKey: ["payment_schedule", contractId, tenantId],

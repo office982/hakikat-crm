@@ -36,6 +36,7 @@ const propertiesByComplex: Record<string, { value: string; label: string }[]> = 
     { value: "p1", label: "כלבייה 1" },
     { value: "p2", label: "כלבייה 2" },
     { value: "p3", label: "אורוות האמנים" },
+    { value: "p10", label: "חקלאי כללי" },
   ],
   c2: [
     { value: "p4", label: "הזמיר 27" },
@@ -67,6 +68,7 @@ const unitsByProperty: Record<string, { value: string; label: string }[]> = {
     { value: "u40", label: "דירה 7" },
   ],
   p9: [{ value: "u41", label: "הדקלים 123" }],
+  p10: [{ value: "u42", label: "חקלאי כללי" }],
 };
 
 export function Step2Unit({ data, onChange }: Props) {

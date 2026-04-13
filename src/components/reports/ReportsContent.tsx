@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card } from "@/components/ui/Card";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
@@ -10,24 +10,56 @@ import { ForecastChart } from "./ForecastChart";
 import { MonthlyTable } from "./MonthlyTable";
 import { EntityPieChart } from "./EntityPieChart";
 import { formatCurrency } from "@/lib/utils";
+import {
+  useRevenueByMonth,
+  useReportKPIs,
+  useEntityBreakdown,
+  useForecast,
+  useLegalEntities,
+  useMonthlyTableData,
+} from "@/hooks/useReports";
 import { CreditCard, TrendingUp, BarChart3, AlertTriangle, Download } from "lucide-react";
 
-const entityOptions = [
-  { value: "", label: "כל הישויות" },
-  { value: "חקיקת", label: "חקיקת נכסים" },
-  { value: "שיא", label: 'שיא הכרמל מדור בע"מ' },
-  { value: "נכסי", label: 'נכסי המושבה בע"מ' },
-];
-
 const periodOptions = [
-  { value: "month", label: "חודש" },
-  { value: "quarter", label: "רבעון" },
-  { value: "year", label: "שנה" },
+  { value: "3", label: "3 חודשים" },
+  { value: "6", label: "6 חודשים" },
+  { value: "12", label: "שנה" },
 ];
 
 export function ReportsContent() {
-  const [entity, setEntity] = useState("");
-  const [period, setPeriod] = useState("year");
+  const [entityId, setEntityId] = useState("");
+  const [period, setPeriod] = useState("12");
+
+  const months = parseInt(period) || 12;
+  const entityFilter = entityId || undefined;
+
+  // Fetch legal entities for filter dropdown
+  const { data: entities } = useLegalEntities();
+
+  const entityOptions = useMemo(() => {
+    const opts = [{ value: "", label: "כל הישויות" }];
+    for (const e of entities || []) {
+      opts.push({ value: e.id, label: e.name });
+    }
+    return opts;
+  }, [entities]);
+
+  // Fetch report data
+  const { data: revenueData, isLoading: revenueLoading } = useRevenueByMonth({
+    legalEntityId: entityFilter,
+    months,
+  });
+  const { data: kpis, isLoading: kpisLoading } = useReportKPIs({ legalEntityId: entityFilter });
+  const { data: entityBreakdown, isLoading: entityLoading } = useEntityBreakdown();
+  const { data: forecastData, isLoading: forecastLoading } = useForecast({ legalEntityId: entityFilter });
+  const { data: monthlyTableData, isLoading: tableLoading } = useMonthlyTableData({
+    legalEntityId: entityFilter,
+    months,
+  });
+
+  const collectionPercent = kpis && kpis.monthlyExpected > 0
+    ? Math.round((kpis.monthlyCollected / kpis.monthlyExpected) * 100)
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -36,7 +68,7 @@ export function ReportsContent() {
         <div className="flex flex-wrap gap-3 items-center justify-between">
           <div className="flex gap-3 flex-wrap">
             <Select options={periodOptions} value={period} onChange={(e) => setPeriod(e.target.value)} className="w-32" />
-            <Select options={entityOptions} value={entity} onChange={(e) => setEntity(e.target.value)} className="w-52" />
+            <Select options={entityOptions} value={entityId} onChange={(e) => setEntityId(e.target.value)} className="w-52" />
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm"><Download className="w-4 h-4" />PDF</Button>
@@ -47,24 +79,53 @@ export function ReportsContent() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard title="הכנסה חודשית" value={formatCurrency(142000)} subtitle={`מתוך ${formatCurrency(158000)} צפוי`} icon={CreditCard} color="green" percent={90} />
-        <KPICard title="גביה שנתית" value={formatCurrency(1420000)} subtitle="מתחילת 2026" icon={TrendingUp} color="blue" />
-        <KPICard title="ממוצע חודשי" value={formatCurrency(148000)} subtitle="12 חודשים אחרונים" icon={BarChart3} color="purple" />
-        <KPICard title="חובות פתוחים" value={formatCurrency(47500)} subtitle="8 דיירים" icon={AlertTriangle} color="red" />
+        <KPICard
+          title="הכנסה חודשית"
+          value={kpisLoading ? "..." : formatCurrency(kpis?.monthlyCollected ?? 0)}
+          subtitle={kpisLoading ? "" : `מתוך ${formatCurrency(kpis?.monthlyExpected ?? 0)} צפוי`}
+          icon={CreditCard}
+          color="green"
+          percent={collectionPercent}
+        />
+        <KPICard
+          title="גביה שנתית"
+          value={kpisLoading ? "..." : formatCurrency(kpis?.annualCollection ?? 0)}
+          subtitle={`מתחילת ${new Date().getFullYear()}`}
+          icon={TrendingUp}
+          color="blue"
+        />
+        <KPICard
+          title="ממוצע חודשי"
+          value={kpisLoading ? "..." : formatCurrency(kpis?.averageMonthly ?? 0)}
+          subtitle="12 חודשים אחרונים"
+          icon={BarChart3}
+          color="purple"
+        />
+        <KPICard
+          title="חובות פתוחים"
+          value={kpisLoading ? "..." : formatCurrency(kpis?.openDebts ?? 0)}
+          subtitle={kpisLoading ? "" : `${kpis?.debtTenants ?? 0} דיירים`}
+          icon={AlertTriangle}
+          color="red"
+        />
       </div>
 
-      {/* Cash Flow Chart - 12 months back */}
-      <CashFlowChart />
+      {/* Cash Flow Chart - past months */}
+      <CashFlowChart data={revenueData ?? []} isLoading={revenueLoading} />
 
       {/* Forecast Chart - 12 months forward */}
-      <ForecastChart />
+      <ForecastChart
+        data={forecastData ?? []}
+        currentMonthlyIncome={kpis?.monthlyExpected}
+        isLoading={forecastLoading}
+      />
 
       {/* Monthly Table + Entity Pie */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
-          <MonthlyTable />
+          <MonthlyTable data={monthlyTableData ?? []} isLoading={tableLoading} />
         </div>
-        <EntityPieChart />
+        <EntityPieChart data={entityBreakdown ?? []} isLoading={entityLoading} />
       </div>
     </div>
   );

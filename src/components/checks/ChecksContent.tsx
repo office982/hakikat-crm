@@ -8,10 +8,12 @@ import { SearchInput } from "@/components/ui/SearchInput";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatCurrency, formatDate, formatMonthYear, daysUntil } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import { FileCheck } from "lucide-react";
+import { FileCheck, ScanLine } from "lucide-react";
 import { useChecks, useUpdateCheckStatus } from "@/hooks/useChecks";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { mockTenants } from "@/lib/mock-data";
+import { Button } from "@/components/ui/Button";
+import { CheckImageUploader } from "@/components/checks/CheckImageUploader";
 
 const statusOptions = [
   { value: "", label: "כל הסטטוסים" },
@@ -37,6 +39,7 @@ const mockChecks = mockTenants.slice(0, 10).flatMap((t, ti) =>
 export function ChecksContent() {
   const [statusFilter, setStatusFilter] = useState("");
   const [search, setSearch] = useState("");
+  const [scannerOpen, setScannerOpen] = useState(false);
 
   const { data: dbChecks = [] } = useChecks({ status: statusFilter || undefined });
   const updateStatus = useUpdateCheckStatus();
@@ -87,11 +90,19 @@ export function ChecksContent() {
 
       {/* Filters */}
       <Card>
-        <div className="flex gap-3 flex-wrap">
+        <div className="flex gap-3 flex-wrap items-center">
           <SearchInput value={search} onChange={setSearch} placeholder="חיפוש דייר / מספר צ׳ק..." className="w-64" />
           <Select options={statusOptions} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-40" />
+          <div className="mr-auto">
+            <Button onClick={() => setScannerOpen(true)} size="sm">
+              <ScanLine className="w-4 h-4" />
+              סרוק צ׳קים
+            </Button>
+          </div>
         </div>
       </Card>
+
+      <CheckImageUploader isOpen={scannerOpen} onClose={() => setScannerOpen(false)} />
 
       {/* Table */}
       {filtered.length === 0 ? (

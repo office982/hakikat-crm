@@ -7,7 +7,7 @@ import { AlertsList } from "./AlertsList";
 import { ActivityFeed } from "./ActivityFeed";
 import { mockKPIs, mockRevenueData, mockAlerts, mockActivities } from "@/lib/mock-data";
 import { formatCurrency } from "@/lib/utils";
-import { useDashboardStats, useRecentActivity } from "@/hooks/useDashboard";
+import { useDashboardStats, useRecentActivity, useRevenueData } from "@/hooks/useDashboard";
 import { useNotifications } from "@/hooks/useNotifications";
 import { PageSpinner } from "@/components/ui/Spinner";
 
@@ -15,6 +15,7 @@ export function DashboardContent() {
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
   const { data: dbActivity } = useRecentActivity();
   const { data: dbNotifications } = useNotifications(true);
+  const { data: revenueData } = useRevenueData();
 
   // Use real data if available, fallback to mock
   const kpis = stats || mockKPIs;
@@ -85,7 +86,7 @@ export function DashboardContent() {
       </div>
 
       {/* Revenue Chart */}
-      <RevenueChart data={mockRevenueData} />
+      <RevenueChart data={revenueData || mockRevenueData} />
 
       {/* Alerts + Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

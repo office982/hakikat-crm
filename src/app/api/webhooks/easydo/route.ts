@@ -27,8 +27,8 @@ export async function POST(request: NextRequest) {
       //   .select('*').eq('easydo_document_id', event.document_id).single();
 
       // 2. Download signed PDF from event.signed_pdf_url
-      // 3. Upload to Google Drive
-      // const driveUrl = await saveContractToDrive(tenant.full_name, pdfBuffer);
+      // 3. Upload to OneDrive
+      // const driveUrl = await saveContractToOneDrive(tenant.full_name, pdfBuffer, `חוזה_${tenant.full_name}.pdf`);
 
       // 4. Update contract status
       // await supabase.from('contracts').update({
