@@ -45,3 +45,13 @@ services:
         sync: false
       - key: WATI_BASE_URL
         sync: false
+      - key: WATI_WEBHOOK_TOKEN
+        sync: false
+      - key: EASYDO_API_KEY
+        sync: false
+      - key: ADMIN_WHATSAPP_PHONE
+        sync: false
+      - key: NEXT_PUBLIC_ONEDRIVE_CLIENT_ID
+        sync: false
+      - key: CRON_SECRET
+        sync: false

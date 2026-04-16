@@ -225,3 +225,16 @@ export interface Setting {
   value: string | null;
   updated_at: string;
 }
+
+export interface PendingAction {
+  id: string;
+  phone: string;
+  sender_name: string | null;
+  action: string;
+  data: Record<string, unknown>;
+  confirmation_message: string | null;
+  status: "pending" | "confirmed" | "rejected" | "expired";
+  resolved_at: string | null;
+  created_at: string;
+  expires_at: string;
+}
