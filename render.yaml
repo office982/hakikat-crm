@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: hakikat-crm
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: CLAUDE_API_KEY
+        sync: false
+      - key: MORNING_API_KEY
+        sync: false
+      - key: MORNING_API_SECRET
+        sync: false
+      - key: MORNING_BASE_URL
+        sync: false
+      - key: ICOUNT_COMPANY_ID
+        sync: false
+      - key: ICOUNT_USER
+        sync: false
+      - key: ICOUNT_PASS
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REFRESH_TOKEN
+        sync: false
+      - key: GOOGLE_DRIVE_ROOT_FOLDER_ID
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM
+        sync: false
+      - key: WATI_API_KEY
+        sync: false
+      - key: WATI_BASE_URL
+        sync: false
