@@ -55,6 +55,8 @@ export interface Tenant {
   unit_id: string | null;
   is_active: boolean;
   notes: string | null;
+  reliability_score: number;
+  reliability_computed_at: string | null;
   created_at: string;
   updated_at: string;
   unit?: Unit;
@@ -79,6 +81,8 @@ export interface Contract {
   easydo_document_id: string | null;
   status: "active" | "pending_signature" | "expired" | "cancelled";
   base_template_used: string | null;
+  renewed_from: string | null;
+  renewed_to: string | null;
   created_at: string;
   updated_at: string;
   tenant?: Tenant;
@@ -115,6 +119,9 @@ export interface Payment {
   deposited_date: string | null;
   icount_receipt_id: string | null;
   receipt_url: string | null;
+  receipt_doc_number: number | null;
+  receipt_issue_attempted_at: string | null;
+  receipt_issue_error: string | null;
   notes: string | null;
   created_by: "manual" | "whatsapp_agent" | "system";
   created_at: string;
@@ -136,6 +143,8 @@ export interface Check {
   status: "pending" | "deposited" | "bounced" | "cancelled";
   deposited_date: string | null;
   notes: string | null;
+  replacement_for: string | null;
+  bounced_at: string | null;
   created_at: string;
   tenant?: Tenant;
 }

@@ -44,6 +44,12 @@ export async function executeAction(
       case "renew_contract":
         return await handleRenewContract(data);
 
+      case "query_reliability":
+        return await handleQueryReliability(data);
+
+      case "compare_checks":
+        return await handleCompareChecks(data);
+
       default:
         return {
           success: true,
@@ -448,49 +454,51 @@ async function handleCheckBounced(
   if (!forMonth)
     return { success: false, message: "חסר חודש — עבור איזה חודש הצ'ק חזר?" };
 
-  // Find the check
-  const { data: check } = await supabase
-    .from("checks")
-    .select("id, amount")
-    .eq("tenant_id", tenant.id)
-    .eq("for_month", forMonth)
-    .single();
+  const reason = data.reason ? String(data.reason) : null;
 
-  if (check) {
-    await supabase.from("checks").update({ status: "bounced" }).eq("id", check.id);
-  }
+  const { data: result, error } = await supabase.rpc("bounce_check_tx", {
+    p_tenant_id: tenant.id,
+    p_for_month: forMonth,
+    p_reason: reason,
+  });
 
-  // Revert payment schedule to overdue
-  const { data: schedRow } = await supabase
-    .from("payment_schedule")
-    .select("id")
-    .eq("tenant_id", tenant.id)
-    .eq("month_year", forMonth)
-    .single();
+  if (error) throw error;
 
-  if (schedRow) {
-    await supabase
-      .from("payment_schedule")
-      .update({ status: "overdue" })
-      .eq("id", schedRow.id);
-  }
+  const payload = (result || {}) as {
+    check_id?: string;
+    schedule_id?: string;
+    amount?: number;
+  };
 
-  await logAction("check", check?.id || tenant.id, "check_bounced", `צ'ק חוזר — ${tenant.full_name}, ${forMonth}`, "whatsapp");
+  const amountStr = payload.amount
+    ? ` (₪${Number(payload.amount).toLocaleString()})`
+    : "";
 
-  // Send notification to tenant
+  // Also raise a notification so it shows up in the dashboard.
+  await supabase.from("notifications").insert({
+    type: "check_bounced",
+    entity_type: "check",
+    entity_id: payload.check_id || tenant.id,
+    title: `🔴 צ'ק חוזר — ${tenant.full_name}`,
+    message: `צ'ק עבור ${forMonth}${amountStr} חזר. יש לעדכן את הדייר ולסדר תשלום חלופי.`,
+  });
+
+  // Notify the tenant on WhatsApp.
   const tenantPhone = tenant.phone.replace(/^0/, "972");
   const bounceMsg =
-    `שלום ${tenant.full_name}, הצ'ק עבור ${forMonth} חזר. ` +
+    `שלום ${tenant.full_name}, הצ'ק עבור ${forMonth}${amountStr} חזר. ` +
     `נא ליצור קשר לסידור התשלום. תודה — קבוצת חקיקת`;
   await sendWhatsAppMessage(tenantPhone, bounceMsg);
 
   return {
     success: true,
-    message: `🔴 צ'ק חוזר — ${tenant.full_name}, ${forMonth}.\nהתשלום סומן כחוזר, היתרה עודכנה, ונשלחה הודעה לדייר.`,
+    message: `🔴 צ'ק חוזר — ${tenant.full_name}, ${forMonth}${amountStr}.\nהתשלום סומן כחוזר, היתרה עודכנה, ונשלחה הודעה לדייר.`,
   };
 }
 
 // ─── renew_contract ──────────────────────────────────────────────
+// When called from the confirmation flow (pending_action → confirmed),
+// this actually creates the new renewal contract via the renew_contract_tx RPC.
 async function handleRenewContract(
   data: Record<string, unknown>
 ): Promise<ActionResult> {
@@ -500,7 +508,6 @@ async function handleRenewContract(
   if (!tenant.contract_id)
     return { success: false, message: `אין חוזה פעיל ל${tenant.full_name}.` };
 
-  // Get current contract
   const { data: currentContract } = await supabase
     .from("contracts")
     .select("*")
@@ -509,75 +516,177 @@ async function handleRenewContract(
 
   if (!currentContract) return { success: false, message: "שגיאה — חוזה לא נמצא." };
 
-  const newRent = Number(data.new_rent || currentContract.monthly_rent);
+  // Default new rent: same base rent + 1 more year of the configured annual_increase,
+  // unless the user supplied an explicit new_rent in the conversation.
+  const annualInc = Number(currentContract.annual_increase_percent || 0);
+  const defaultBumped = Math.round(
+    Number(currentContract.monthly_rent) * (1 + annualInc / 100)
+  );
+  const newRent = Number(data.new_rent || defaultBumped);
+
   const currentEnd = new Date(currentContract.end_date);
   const newStart = new Date(currentEnd);
   newStart.setDate(newStart.getDate() + 1);
+  const months = Number(data.months || 12);
   const newEnd = new Date(newStart);
-  newEnd.setFullYear(newEnd.getFullYear() + 1);
+  newEnd.setMonth(newEnd.getMonth() + months);
+  newEnd.setDate(newEnd.getDate() - 1);
 
   const newStartStr = newStart.toISOString().split("T")[0];
   const newEndStr = newEnd.toISOString().split("T")[0];
 
-  let msg = `📄 הצעת חידוש ל${tenant.full_name}:\n`;
+  // Build payment schedule for the new period.
+  const schedule = generatePaymentSchedule({
+    start_date: newStartStr,
+    end_date: newEndStr,
+    monthly_rent: newRent,
+    annual_increase_percent: annualInc,
+  });
+
+  const scheduleJson = schedule.map((row) => ({
+    month_year: row.month_year,
+    due_date: row.due_date,
+    expected_amount: row.expected_amount,
+    year_number: row.year_number,
+  }));
+
+  const { data: newContractId, error } = await supabase.rpc("renew_contract_tx", {
+    p_old_contract_id: currentContract.id,
+    p_new_rent: newRent,
+    p_months: months,
+    p_schedule: scheduleJson,
+  });
+
+  if (error) throw error;
+
+  await logAction(
+    "contract",
+    newContractId as string,
+    "contract_renewed",
+    `חידוש חוזה ל${tenant.full_name} — ₪${newRent.toLocaleString()}/חודש, ${newStartStr} עד ${newEndStr}`,
+    "whatsapp"
+  );
+
+  let msg = `📄 חוזה חידוש נוצר ל${tenant.full_name}:\n`;
   msg += `• תקופה: ${newStartStr} עד ${newEndStr}\n`;
   msg += `• שכירות: ₪${newRent.toLocaleString()}/חודש`;
   if (newRent !== currentContract.monthly_rent) {
-    msg += ` (היה ₪${currentContract.monthly_rent.toLocaleString()})`;
+    msg += ` (היה ₪${Number(currentContract.monthly_rent).toLocaleString()})`;
   }
-  msg += `\n\nלשלוח לדייר לחתימה?`;
+  msg += `\n\nלשלוח לדייר לחתימה דיגיטלית?`;
 
   return { success: true, message: msg };
 }
 
 // ─── Issue receipt (post-confirmation helper) ────────────────────
+// Reuses the shared `issueReceiptForPayment` helper so the WhatsApp
+// flow, the UI, and the webhook paths all share one implementation.
 export async function issueReceipt(
   tenantId: string,
   amount: number,
-  description: string
+  _description: string
 ): Promise<ActionResult> {
   try {
     const { data: tenant } = await supabase
       .from("tenants")
-      .select("full_name, email")
+      .select("full_name")
       .eq("id", tenantId)
       .single();
-
     if (!tenant) return { success: false, message: "דייר לא נמצא." };
 
-    const baseUrl = process.env.RENDER_EXTERNAL_URL || process.env.NEXTAUTH_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
-    const res = await fetch(
-      `${baseUrl}/api/icount/receipt`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          client_name: tenant.full_name,
-          amount,
-          description,
-          email: tenant.email,
-        }),
-      }
-    );
+    // Find the most recent un-invoiced payment for this tenant matching the amount.
+    const { data: payment } = await supabase
+      .from("payments")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("amount", amount)
+      .is("icount_receipt_id", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    if (!res.ok) {
-      const err = await res.json();
-      if (err.skipped) return { success: true, message: "ישות פרטי — לא מפיקה קבלות." };
-      throw new Error(err.error);
+    if (!payment) {
+      return { success: false, message: "לא מצאתי תשלום תואם להנפקת קבלה." };
     }
 
-    const receipt = await res.json();
+    const { issueReceiptForPayment } = await import("@/lib/receipts");
+    const result = await issueReceiptForPayment(payment.id);
 
-    await logAction("tenant", tenantId, "receipt_issued", `קבלה #${receipt.docnum} — ₪${amount.toLocaleString()}`, "whatsapp");
+    if (result.skipped) {
+      return { success: true, message: "ישות פרטי — לא מפיקה קבלות." };
+    }
+    if (!result.success) {
+      return { success: false, message: "שגיאה בהנפקת קבלה." };
+    }
 
     return {
       success: true,
-      message: `🧾 קבלה #${receipt.docnum} הופקה — ₪${amount.toLocaleString()} ל${tenant.full_name}.`,
+      message: `🧾 קבלה #${result.doc_number} הופקה — ₪${amount.toLocaleString()} ל${tenant.full_name}.`,
     };
   } catch (err) {
     console.error("issueReceipt failed:", err);
     return { success: false, message: "שגיאה בהנפקת קבלה." };
   }
+}
+
+// ─── query_reliability ───────────────────────────────────────────
+async function handleQueryReliability(
+  data: Record<string, unknown>
+): Promise<ActionResult> {
+  const tenant = await resolveTenant(data);
+  if (!tenant)
+    return { success: false, message: `לא מצאתי דייר בשם "${data.tenant_name}".` };
+
+  const { data: row } = await supabase
+    .from("tenants")
+    .select("reliability_score, reliability_computed_at")
+    .eq("id", tenant.id)
+    .single();
+
+  const score = row?.reliability_score ?? 100;
+  const { tierFor, tierLabelHe } = await import("@/lib/reliability");
+  const tier = tierFor(score);
+  const computed = row?.reliability_computed_at
+    ? new Date(row.reliability_computed_at).toISOString().split("T")[0]
+    : "עדיין לא חושב";
+
+  const { count: bounced } = await supabase
+    .from("checks")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenant.id)
+    .eq("status", "bounced");
+
+  const { count: overdue } = await supabase
+    .from("payment_schedule")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenant.id)
+    .eq("status", "overdue");
+
+  let msg = `⭐ דירוג אמינות — ${tenant.full_name}:\n`;
+  msg += `• ציון: ${score}/100 (${tierLabelHe(tier)})\n`;
+  if ((bounced || 0) > 0) msg += `• צ'קים חוזרים: ${bounced}\n`;
+  if ((overdue || 0) > 0) msg += `• חודשים בפיגור: ${overdue}\n`;
+  msg += `• עודכן לאחרונה: ${computed}`;
+
+  return { success: true, message: msg };
+}
+
+// ─── compare_checks ──────────────────────────────────────────────
+async function handleCompareChecks(
+  data: Record<string, unknown>
+): Promise<ActionResult> {
+  const tenant = await resolveTenant(data);
+  if (!tenant)
+    return { success: false, message: `לא מצאתי דייר בשם "${data.tenant_name}".` };
+  if (!tenant.contract_id)
+    return { success: false, message: `אין חוזה פעיל ל${tenant.full_name}.` };
+
+  const { compareChecksForContract, formatComparisonHe } = await import("@/lib/check-comparison");
+  const result = await compareChecksForContract(tenant.contract_id);
+  return {
+    success: true,
+    message: `${tenant.full_name}\n${formatComparisonHe(result)}`,
+  };
 }
 
 // ─── Helper ──────────────────────────────────────────────────────

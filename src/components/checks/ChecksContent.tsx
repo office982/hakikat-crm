@@ -9,7 +9,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { formatCurrency, formatDate, formatMonthYear, daysUntil } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { FileCheck, ScanLine } from "lucide-react";
-import { useChecks, useUpdateCheckStatus } from "@/hooks/useChecks";
+import { useChecks, useUpdateCheckStatus, useBounceCheck } from "@/hooks/useChecks";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { mockTenants } from "@/lib/mock-data";
 import { Button } from "@/components/ui/Button";
@@ -43,10 +43,12 @@ export function ChecksContent() {
 
   const { data: dbChecks = [] } = useChecks({ status: statusFilter || undefined });
   const updateStatus = useUpdateCheckStatus();
+  const bounceCheck = useBounceCheck();
 
   const checks = isSupabaseConfigured() && dbChecks.length > 0
     ? dbChecks.map((c) => ({
         id: c.id,
+        tenant_id: c.tenant_id,
         tenant_name: c.tenant?.full_name || "",
         check_number: c.check_number,
         bank_name: c.bank_name || "",
@@ -55,7 +57,7 @@ export function ChecksContent() {
         due_date: c.due_date,
         status: c.status,
       }))
-    : mockChecks;
+    : mockChecks.map((c) => ({ ...c, tenant_id: "" }));
 
   const filtered = checks.filter((c) => {
     if (statusFilter && c.status !== statusFilter) return false;
@@ -143,11 +145,41 @@ export function ChecksContent() {
                       <td className="px-4 py-3"><CheckStatusBadge status={check.status} /></td>
                       <td className="px-4 py-3">
                         {check.status === "pending" && (
+                          <div className="flex gap-3">
+                            <button
+                              onClick={() => updateStatus.mutate({ id: check.id, status: "deposited" })}
+                              className="text-xs text-primary font-medium hover:underline"
+                            >
+                              סמן הופקד
+                            </button>
+                            {check.tenant_id && (
+                              <button
+                                onClick={() => {
+                                  if (!confirm(`לסמן את הצ'ק עבור ${check.for_month} כצ'ק חוזר?`)) return;
+                                  bounceCheck.mutate({
+                                    tenant_id: check.tenant_id,
+                                    for_month: check.for_month,
+                                  });
+                                }}
+                                className="text-xs text-danger font-medium hover:underline"
+                              >
+                                צ'ק חוזר
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {check.status === "deposited" && check.tenant_id && (
                           <button
-                            onClick={() => updateStatus.mutate({ id: check.id, status: "deposited" })}
-                            className="text-xs text-primary font-medium hover:underline"
+                            onClick={() => {
+                              if (!confirm(`לסמן את הצ'ק עבור ${check.for_month} כצ'ק חוזר?`)) return;
+                              bounceCheck.mutate({
+                                tenant_id: check.tenant_id,
+                                for_month: check.for_month,
+                              });
+                            }}
+                            className="text-xs text-danger font-medium hover:underline"
                           >
-                            סמן הופקד
+                            צ'ק חוזר
                           </button>
                         )}
                       </td>

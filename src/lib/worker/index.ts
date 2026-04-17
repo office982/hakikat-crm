@@ -1,17 +1,22 @@
 import { getBoss } from "./boss";
 import { DAILY_ALERTS_JOB, handleDailyAlerts } from "./jobs/daily-alerts";
+import {
+  WEEKLY_REPORT_JOB,
+  MONTHLY_REPORT_JOB,
+  handleWeeklyReport,
+  handleMonthlyReport,
+} from "./jobs/whatsapp-reports";
+import {
+  RELIABILITY_RECOMPUTE_JOB,
+  handleReliabilityRecompute,
+} from "./jobs/reliability-recompute";
+import { DRIVE_BACKUP_JOB, handleDriveBackup } from "./jobs/drive-backup";
 
 let started = false;
 
 /**
  * Start the background worker.
  * Safe to call multiple times — only starts once.
- *
- * Currently runs inside the web service process.
- * To extract to a Render Background Worker later:
- *   1. Create a new file: worker.ts that imports and calls startWorker()
- *   2. Add a Background Worker in Render with command: node worker.js
- *   3. Remove the startWorker() call from instrumentation.ts
  */
 export async function startWorker() {
   if (started) return;
@@ -28,19 +33,55 @@ export async function startWorker() {
     console.log("[worker] pg-boss started");
 
     // ── Register job handlers ──
-
-    await boss.work(DAILY_ALERTS_JOB, { teamSize: 1 }, async () => {
+    await boss.work(DAILY_ALERTS_JOB, { localConcurrency: 1 }, async () => {
       await handleDailyAlerts();
     });
 
-    // ── Schedule recurring jobs ──
+    await boss.work(WEEKLY_REPORT_JOB, { localConcurrency: 1 }, async () => {
+      await handleWeeklyReport();
+    });
 
-    // Daily alerts at 05:00 UTC (08:00 Israel time)
-    await boss.schedule(DAILY_ALERTS_JOB, "0 5 * * *", undefined, {
+    await boss.work(MONTHLY_REPORT_JOB, { localConcurrency: 1 }, async () => {
+      await handleMonthlyReport();
+    });
+
+    await boss.work(RELIABILITY_RECOMPUTE_JOB, { localConcurrency: 1 }, async () => {
+      await handleReliabilityRecompute();
+    });
+
+    await boss.work(DRIVE_BACKUP_JOB, { localConcurrency: 1 }, async () => {
+      await handleDriveBackup();
+    });
+
+    // ── Schedule recurring jobs (all in Asia/Jerusalem) ──
+    // Daily 08:00 — alerts
+    await boss.schedule(DAILY_ALERTS_JOB, "0 8 * * *", undefined, {
       tz: "Asia/Jerusalem",
     });
 
-    console.log("[worker] Jobs registered: daily-alerts (08:00 Israel)");
+    // Nightly 02:30 — reliability recompute
+    await boss.schedule(RELIABILITY_RECOMPUTE_JOB, "30 2 * * *", undefined, {
+      tz: "Asia/Jerusalem",
+    });
+
+    // Sunday 08:15 — weekly report
+    await boss.schedule(WEEKLY_REPORT_JOB, "15 8 * * 0", undefined, {
+      tz: "Asia/Jerusalem",
+    });
+
+    // 1st of month 08:30 — monthly report
+    await boss.schedule(MONTHLY_REPORT_JOB, "30 8 1 * *", undefined, {
+      tz: "Asia/Jerusalem",
+    });
+
+    // Sunday 03:00 — drive backup
+    await boss.schedule(DRIVE_BACKUP_JOB, "0 3 * * 0", undefined, {
+      tz: "Asia/Jerusalem",
+    });
+
+    console.log(
+      "[worker] Jobs registered: daily-alerts, weekly-report, monthly-report, reliability-recompute, drive-backup"
+    );
   } catch (err) {
     console.error("[worker] Failed to start:", err);
     started = false;

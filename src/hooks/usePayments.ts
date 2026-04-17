@@ -135,48 +135,71 @@ export function useCreatePayment() {
       check_date?: string;
       notes?: string;
       created_by?: string;
+      auto_issue_receipt?: boolean;
     }) => {
-      // 1. Create payment
-      const { data, error } = await supabase
-        .from("payments")
-        .insert(payment)
-        .select()
-        .single();
+      const { auto_issue_receipt, ...insertPayload } = payment;
 
-      if (error) throw error;
-
-      // 2. Update schedule status
-      if (payment.schedule_id) {
+      // 1. Create payment via atomic RPC (insert + schedule update + log)
+      let expectedAmount = 0;
+      if (insertPayload.schedule_id) {
         const { data: schedule } = await supabase
           .from("payment_schedule")
           .select("expected_amount")
-          .eq("id", payment.schedule_id)
+          .eq("id", insertPayload.schedule_id)
           .single();
-
-        const newStatus =
-          payment.amount >= (schedule?.expected_amount || 0) ? "paid" : "partial";
-
-        await supabase
-          .from("payment_schedule")
-          .update({ status: newStatus })
-          .eq("id", payment.schedule_id);
+        expectedAmount = schedule?.expected_amount || 0;
       }
 
-      // 3. Log action
-      await supabase.from("action_logs").insert({
-        entity_type: "payment",
-        entity_id: data.id,
-        action: "payment_recorded",
-        description: `נרשם תשלום ₪${payment.amount.toLocaleString()} עבור ${payment.month_paid_for}`,
-        source: payment.created_by || "manual",
+      const { data: paymentId, error } = await supabase.rpc("record_payment_manual_tx", {
+        p_tenant_id: insertPayload.tenant_id,
+        p_contract_id: insertPayload.contract_id,
+        p_schedule_id: insertPayload.schedule_id || null,
+        p_amount: insertPayload.amount,
+        p_payment_date: insertPayload.payment_date,
+        p_month_paid_for: insertPayload.month_paid_for,
+        p_payment_method: insertPayload.payment_method,
+        p_check_number: insertPayload.check_number || null,
+        p_check_bank: insertPayload.check_bank || null,
+        p_check_date: insertPayload.check_date || null,
+        p_notes: insertPayload.notes || null,
+        p_expected_amount: expectedAmount,
+        p_created_by: insertPayload.created_by || "manual",
       });
 
-      return data;
+      if (error) throw error;
+
+      // 2. Optional: auto-issue receipt via server-side route (handles Morning + skip rules).
+      if (auto_issue_receipt && paymentId) {
+        try {
+          await fetch(`/api/payments/${paymentId}/issue-receipt`, { method: "POST" });
+        } catch (receiptErr) {
+          console.warn("auto-issue receipt failed:", receiptErr);
+        }
+      }
+
+      return { id: paymentId };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["payments"] });
       queryClient.invalidateQueries({ queryKey: ["payment_schedule"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+export function useIssueReceipt() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (paymentId: string) => {
+      const res = await fetch(`/api/payments/${paymentId}/issue-receipt`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "failed" }));
+        throw new Error(err.error || "failed");
+      }
+      return res.json() as Promise<{ docnum?: number; doc_url?: string; skipped?: boolean }>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["payments"] });
     },
   });
 }

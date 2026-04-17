@@ -66,32 +66,26 @@ async function createFolder(accessToken: string, name: string, parentId: string)
   return data.id;
 }
 
+export interface DriveUploadResult {
+  id: string;
+  web_view_link: string;
+  size_bytes?: number;
+}
+
 /**
- * Save a contract PDF to Google Drive in the tenant's folder.
- * Creates the folder if it doesn't exist.
+ * Low-level: upload an arbitrary buffer to a Drive folder.
+ * Returns the file id + link. Does NOT set permissions (caller decides).
  */
-export async function saveContractToDrive(
-  tenantName: string,
-  pdfBuffer: Buffer,
-  fileName: string
-): Promise<string> {
+export async function uploadToDriveFolder(params: {
+  folderId: string;
+  fileName: string;
+  mimeType: string;
+  data: Buffer;
+}): Promise<DriveUploadResult> {
   const accessToken = await getAccessToken();
-  const rootFolderId = GOOGLE_DRIVE_ROOT_FOLDER_ID;
-
-  if (!rootFolderId) {
-    throw new Error("Google Drive root folder not configured");
-  }
-
-  // Find or create tenant folder
-  let tenantFolderId = await findFolder(accessToken, tenantName, rootFolderId);
-  if (!tenantFolderId) {
-    tenantFolderId = await createFolder(accessToken, tenantName, rootFolderId);
-  }
-
-  // Upload file using multipart upload
   const metadata = JSON.stringify({
-    name: fileName,
-    parents: [tenantFolderId],
+    name: params.fileName,
+    parents: [params.folderId],
   });
 
   const boundary = "hakikat_boundary";
@@ -100,13 +94,13 @@ export async function saveContractToDrive(
     `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
     `${metadata}\r\n` +
     `--${boundary}\r\n` +
-    `Content-Type: application/pdf\r\n` +
+    `Content-Type: ${params.mimeType}\r\n` +
     `Content-Transfer-Encoding: base64\r\n\r\n` +
-    `${pdfBuffer.toString("base64")}\r\n` +
+    `${params.data.toString("base64")}\r\n` +
     `--${boundary}--`;
 
-  const uploadResponse = await fetch(
-    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink",
+  const res = await fetch(
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink,size",
     {
       method: "POST",
       headers: {
@@ -117,10 +111,35 @@ export async function saveContractToDrive(
     }
   );
 
-  const file = await uploadResponse.json();
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Drive upload failed: ${res.status} — ${err}`);
+  }
+  const file = await res.json();
+  return {
+    id: file.id,
+    web_view_link: file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`,
+    size_bytes: file.size ? Number(file.size) : params.data.length,
+  };
+}
 
-  // Make file readable by anyone with link
-  await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}/permissions`, {
+/**
+ * Ensure a folder exists under `parentId`, creating it if missing.
+ * Returns the folder id.
+ */
+export async function ensureFolder(folderName: string, parentId: string): Promise<string> {
+  const accessToken = await getAccessToken();
+  const existing = await findFolder(accessToken, folderName, parentId);
+  if (existing) return existing;
+  return createFolder(accessToken, folderName, parentId);
+}
+
+/**
+ * Share a file with anyone who has the link.
+ */
+export async function makeFilePublic(fileId: string): Promise<void> {
+  const accessToken = await getAccessToken();
+  await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -128,6 +147,30 @@ export async function saveContractToDrive(
     },
     body: JSON.stringify({ role: "reader", type: "anyone" }),
   });
+}
 
-  return file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`;
+/**
+ * Save a contract PDF to Google Drive in the tenant's folder.
+ * Creates the folder if it doesn't exist.
+ */
+export async function saveContractToDrive(
+  tenantName: string,
+  pdfBuffer: Buffer,
+  fileName: string
+): Promise<string> {
+  const rootFolderId = GOOGLE_DRIVE_ROOT_FOLDER_ID;
+  if (!rootFolderId) {
+    throw new Error("Google Drive root folder not configured");
+  }
+  const tenantFolderId = await ensureFolder(tenantName, rootFolderId);
+
+  const file = await uploadToDriveFolder({
+    folderId: tenantFolderId,
+    fileName,
+    mimeType: "application/pdf",
+    data: pdfBuffer,
+  });
+
+  await makeFilePublic(file.id);
+  return file.web_view_link;
 }

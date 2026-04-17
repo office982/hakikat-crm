@@ -1,13 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { formatCurrency } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import { Plus, FolderKanban } from "lucide-react";
+import { Plus, FolderKanban, Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useProjects } from "@/hooks/useProjects";
+import { useProjects, useDeleteProject } from "@/hooks/useProjects";
+import { ProjectFormModal } from "@/components/projects/ProjectFormModal";
+import type { Project } from "@/types/database";
 
 const statusLabels: Record<string, { label: string; variant: "success" | "warning" | "default" }> = {
   active: { label: "פעיל", variant: "success" },
@@ -17,6 +20,28 @@ const statusLabels: Record<string, { label: string; variant: "success" | "warnin
 
 export function ProjectsContent() {
   const { data: projects, isLoading } = useProjects();
+  const deleteMut = useDeleteProject();
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Project | null>(null);
+
+  const openCreate = () => {
+    setEditing(null);
+    setFormOpen(true);
+  };
+
+  const openEdit = (p: Project) => {
+    setEditing(p);
+    setFormOpen(true);
+  };
+
+  const remove = async (p: Project) => {
+    if (!confirm(`למחוק את הפרויקט "${p.name}"?`)) return;
+    try {
+      await deleteMut.mutateAsync(p.id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "מחיקה נכשלה.");
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -24,7 +49,9 @@ export function ProjectsContent() {
         <div className="text-sm text-muted">
           {isLoading ? "טוען..." : `${projects?.length ?? 0} פרויקטים`}
         </div>
-        <Button size="sm"><Plus className="w-4 h-4" />פרויקט חדש</Button>
+        <Button size="sm" onClick={openCreate}>
+          <Plus className="w-4 h-4" />פרויקט חדש
+        </Button>
       </div>
 
       {isLoading ? (
@@ -57,10 +84,25 @@ export function ProjectsContent() {
                     </div>
                     <p className="text-xs text-muted">{entityName}</p>
                   </div>
-                  <Badge variant={s.variant}>{s.label}</Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={s.variant}>{s.label}</Badge>
+                    <button
+                      onClick={() => openEdit(project)}
+                      className="p-1 rounded hover:bg-gray-100 text-muted"
+                      aria-label="ערוך"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => remove(project)}
+                      className="p-1 rounded hover:bg-red-50 text-danger"
+                      aria-label="מחק"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
-                {/* Budget Progress */}
                 <div className="mb-3">
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-muted">תקציב: {formatCurrency(budget)}</span>
@@ -100,6 +142,12 @@ export function ProjectsContent() {
           })}
         </div>
       )}
+
+      <ProjectFormModal
+        isOpen={formOpen}
+        onClose={() => setFormOpen(false)}
+        project={editing}
+      />
     </div>
   );
 }

@@ -1,5 +1,10 @@
 import { supabase } from "@/lib/supabase";
-import { sendWhatsAppMessage } from "@/lib/api/wati";
+import {
+  createNotifications,
+  notifyAdminUrgent,
+  type NotificationInput,
+} from "@/lib/notifications";
+import { getReliabilityAlertThreshold } from "@/lib/reliability";
 
 export const DAILY_ALERTS_JOB = "daily-alerts";
 
@@ -17,24 +22,22 @@ function formatMonthYear(date: Date): string {
   return `${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
 }
 
-interface NotificationRow {
-  type: string;
-  entity_type: string;
-  entity_id: string;
-  title: string;
-  message: string;
-  due_date?: string;
-}
+const URGENT_TYPES = new Set([
+  "missing_payment",
+  "contract_expiry_urgent",
+  "check_bounced",
+  "easydo_stuck",
+  "low_reliability",
+]);
 
 /**
- * Daily alerts job — checks contracts, payments, checks, invoices.
- * Saves notifications to DB and sends urgent ones to admin via WhatsApp.
+ * Daily alerts job — checks contracts, payments, checks, invoices,
+ * EasyDo signing status, and reliability scores.
  */
 export async function handleDailyAlerts() {
   const today = new Date();
   const todayStr = today.toISOString().split("T")[0];
-  const notifications: NotificationRow[] = [];
-  const adminPhone = process.env.ADMIN_WHATSAPP_PHONE || "";
+  const notifications: NotificationInput[] = [];
 
   console.log(`[daily-alerts] Starting check at ${todayStr}`);
 
@@ -92,7 +95,6 @@ export async function handleDailyAlerts() {
     for (const row of unpaid || []) {
       const tenantName =
         (row.tenant as unknown as Record<string, unknown>)?.full_name || "דייר";
-      // Mark as overdue
       await supabase
         .from("payment_schedule")
         .update({ status: "overdue" })
@@ -130,6 +132,25 @@ export async function handleDailyAlerts() {
     });
   }
 
+  // ── 4a. Bounced checks in the last 24h (urgent) ──
+  const { data: newBounced } = await supabase
+    .from("checks")
+    .select("id, check_number, amount, for_month, tenant:tenants(full_name)")
+    .eq("status", "bounced")
+    .gte("bounced_at", addDays(today, -1));
+
+  for (const check of newBounced || []) {
+    const tenantName =
+      (check.tenant as unknown as Record<string, unknown>)?.full_name || "דייר";
+    notifications.push({
+      type: "check_bounced",
+      entity_type: "check",
+      entity_id: check.id,
+      title: `🔴 צ'ק חוזר — ${tenantName}`,
+      message: `צ'ק #${check.check_number} (₪${check.amount}) של ${tenantName} עבור ${check.for_month} חזר. יש ליצור קשר לסידור התשלום.`,
+    });
+  }
+
   // ── 5. Unpaid supplier invoices > 30 days ──
   const { data: oldInvoices } = await supabase
     .from("project_expenses")
@@ -149,39 +170,53 @@ export async function handleDailyAlerts() {
     });
   }
 
+  // ── 5a. EasyDo stuck: pending_signature for > 5 days ──
+  const { data: stuck } = await supabase
+    .from("contracts")
+    .select("id, created_at, easydo_document_id, tenant:tenants(full_name)")
+    .eq("status", "pending_signature")
+    .lte("created_at", subDays(today, 5));
+
+  for (const c of stuck || []) {
+    const tenantName =
+      (c.tenant as unknown as Record<string, unknown>)?.full_name || "דייר";
+    const docRef = c.easydo_document_id ? ` (EasyDo ${c.easydo_document_id})` : "";
+    notifications.push({
+      type: "easydo_stuck",
+      entity_type: "contract",
+      entity_id: c.id,
+      title: `🔴 חוזה תקוע בחתימה — ${tenantName}`,
+      message: `החוזה של ${tenantName}${docRef} ממתין לחתימה מעל 5 ימים. יש לבדוק אצל הדייר או ב-EasyDo.`,
+    });
+  }
+
+  // ── 5b. Low-reliability active tenants ──
+  const threshold = await getReliabilityAlertThreshold();
+  const { data: lowRel } = await supabase
+    .from("tenants")
+    .select("id, full_name, reliability_score")
+    .eq("is_active", true)
+    .lt("reliability_score", threshold);
+
+  for (const t of lowRel || []) {
+    notifications.push({
+      type: "low_reliability",
+      entity_type: "tenant",
+      entity_id: t.id,
+      title: `⚠️ דירוג אמינות נמוך — ${t.full_name}`,
+      message: `הדירוג של ${t.full_name} הוא ${t.reliability_score}/100. ייתכן שצריך מעקב צמוד.`,
+    });
+  }
+
   // ── 6. Expire stale pending actions ──
   const { data: expiredCount } = await supabase.rpc("expire_pending_actions");
 
-  // ── Save notifications (with deduplication) ──
-  let created = 0;
-  for (const n of notifications) {
-    const { count } = await supabase
-      .from("notifications")
-      .select("id", { count: "exact", head: true })
-      .eq("type", n.type)
-      .eq("entity_id", n.entity_id)
-      .gte("created_at", todayStr);
+  // ── Save notifications (dedup + insert) ──
+  const created = await createNotifications(notifications);
 
-    if ((count || 0) === 0) {
-      await supabase.from("notifications").insert(n);
-      created++;
-    }
-  }
-
-  // ── Send urgent alerts to admin via WhatsApp ──
-  if (adminPhone) {
-    const urgent = notifications.filter(
-      (n) => n.type === "missing_payment" || n.type === "contract_expiry_urgent"
-    );
-    if (urgent.length > 0) {
-      let summary = `📋 התראות יומיות (${todayStr}):\n\n`;
-      for (const n of urgent) {
-        summary += `• ${n.title}\n`;
-      }
-      summary += `\nסה"כ ${notifications.length} התראות. פתח את המערכת לפרטים.`;
-      await sendWhatsAppMessage(adminPhone, summary);
-    }
-  }
+  // ── Admin WhatsApp summary for urgent items ──
+  const urgent = notifications.filter((n) => URGENT_TYPES.has(n.type));
+  await notifyAdminUrgent(urgent, notifications.length);
 
   console.log(
     `[daily-alerts] Done — ${created} notifications created, ${expiredCount || 0} pending actions expired`

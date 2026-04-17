@@ -15,6 +15,7 @@ import { useTenants } from "@/hooks/useTenants";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { ReliabilityBadge } from "@/components/ui/ReliabilityBadge";
 
 const entityOptions = [
   { value: "", label: "כל הישויות" },
@@ -69,10 +70,11 @@ export function TenantsContent() {
           contract_end: activeContract?.end_date || "",
           status: activeContract?.status || "expired",
           is_active: t.is_active,
+          reliability_score: t.reliability_score ?? null,
         };
       });
     }
-    return mockTenants;
+    return mockTenants.map((t) => ({ ...t, reliability_score: null as number | null }));
   }, [useDb, dbTenants]);
 
   const filtered = useMemo(() => {
@@ -144,6 +146,7 @@ export function TenantsContent() {
                   <th className="text-right px-4 py-3 font-medium text-muted hidden lg:table-cell">שכ&quot;ד</th>
                   <th className="text-right px-4 py-3 font-medium text-muted">יתרה</th>
                   <th className="text-right px-4 py-3 font-medium text-muted hidden lg:table-cell">סיום חוזה</th>
+                  <th className="text-right px-4 py-3 font-medium text-muted hidden md:table-cell">אמינות</th>
                   <th className="text-right px-4 py-3 font-medium text-muted">סטטוס</th>
                   <th className="text-right px-4 py-3 font-medium text-muted">פעולות</th>
                 </tr>
@@ -172,6 +175,9 @@ export function TenantsContent() {
                             {days <= 0 && " (פג)"}
                           </span>
                         ) : "—"}
+                      </td>
+                      <td className="px-4 py-3 hidden md:table-cell">
+                        <ReliabilityBadge score={tenant.reliability_score} />
                       </td>
                       <td className="px-4 py-3">
                         <Badge variant={tenant.status === "active" ? "success" : "danger"}>

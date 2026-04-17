@@ -54,14 +54,26 @@ export async function sendForSignature(request: EasydoSendRequest): Promise<{ do
 }
 
 /**
- * Verify webhook signature from EasyDo.
+ * Verify webhook signature from EasyDo via HMAC-SHA256.
+ * EasyDo is expected to send the signature in the `x-easydo-signature`
+ * header as a hex-encoded HMAC of the raw request body with the shared
+ * secret. Falls back to `true` when no secret is configured (dev mode).
  */
 export function verifyEasydoWebhook(
   body: string,
   signature: string,
   secret: string
 ): boolean {
-  // TODO: Implement HMAC verification based on EasyDo's webhook docs
-  // For now, basic check
-  return !!signature && !!secret;
+  if (!secret) return true;
+  if (!signature) return false;
+
+  // Lazy-require to keep this file usable in edge runtime contexts that
+  // don't import crypto; webhook runs on Node.js.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const crypto = require("crypto") as typeof import("crypto");
+  const digest = crypto.createHmac("sha256", secret).update(body).digest("hex");
+  const sigBuf = Buffer.from(signature.replace(/^sha256=/, ""), "hex");
+  const digBuf = Buffer.from(digest, "hex");
+  if (sigBuf.length !== digBuf.length) return false;
+  return crypto.timingSafeEqual(sigBuf, digBuf);
 }

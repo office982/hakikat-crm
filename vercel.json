@@ -3,6 +3,22 @@
     {
       "path": "/api/notifications/check",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/reliability/recompute",
+      "schedule": "30 0 * * *"
+    },
+    {
+      "path": "/api/reports/whatsapp?kind=weekly",
+      "schedule": "15 6 * * 0"
+    },
+    {
+      "path": "/api/reports/whatsapp?kind=monthly",
+      "schedule": "30 6 1 * *"
+    },
+    {
+      "path": "/api/backup/drive",
+      "schedule": "0 1 * * 0"
     }
   ]
 }
