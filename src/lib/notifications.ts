@@ -61,6 +61,27 @@ export async function createNotifications(rows: NotificationInput[]): Promise<nu
 }
 
 /**
+ * Insert a per-action notification (no dedup). Use this for events that
+ * happen at most once per object (e.g. contract sent, payment recorded,
+ * property added) rather than recurring alerts (e.g. "expires in 30 days").
+ */
+export async function notifyAction(n: {
+  type: string;
+  entity_type: string;
+  entity_id: string;
+  title: string;
+  message?: string;
+}): Promise<void> {
+  await supabase.from("notifications").insert({
+    type: n.type,
+    entity_type: n.entity_type,
+    entity_id: n.entity_id,
+    title: n.title,
+    message: n.message ?? null,
+  });
+}
+
+/**
  * Send a summary of urgent notifications to the admin via WhatsApp.
  * Caller passes the notifications already created today.
  */

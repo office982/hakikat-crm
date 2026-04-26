@@ -3,6 +3,33 @@ import { generatePaymentSchedule } from "@/lib/payment-calculator";
 import { resolveTenant, resolveProject } from "./resolve-tenant";
 import { sendWhatsAppMessage } from "@/lib/api/wati";
 import type { AIAgentResponse } from "@/lib/api/claude";
+import { recordCheckAsPayment, dueDateToForMonth } from "@/lib/checks-to-payments";
+import { notifyAction } from "@/lib/notifications";
+
+// Maps each WhatsApp action to a short notification title shown in the
+// alerts page. Pure-query actions (balance, report, list) skip the
+// notification — they're not state changes.
+const NOTIFY_TITLE: Record<string, (data: Record<string, unknown>) => string> = {
+  record_payment: (d) => `💰 תשלום נרשם — ${d.tenant_name} (${d.month})`,
+  create_contract: (d) => `📄 חוזה נוצר — ${d.tenant_name}`,
+  add_project_expense: (d) => `🔧 הוצאה בפרויקט — ${d.project_name} ₪${d.amount}`,
+  send_reminder: (d) => `📨 תזכורת נשלחה — ${d.tenant_name}`,
+  mark_check_bounced: (d) => `🔴 צ'ק חוזר — ${d.tenant_name}`,
+  renew_contract: (d) => `🔁 חידוש חוזה — ${d.tenant_name}`,
+  create_project: (d) => `📁 פרויקט חדש — ${d.project_name || d.name}`,
+  delete_project: (d) => `🗑 פרויקט נמחק — ${d.project_name}`,
+};
+
+const NOTIFY_ENTITY_TYPE: Record<string, string> = {
+  record_payment: "payment",
+  create_contract: "contract",
+  add_project_expense: "project",
+  send_reminder: "tenant",
+  mark_check_bounced: "check",
+  renew_contract: "contract",
+  create_project: "project",
+  delete_project: "project",
+};
 
 export interface ActionResult {
   success: boolean;
@@ -18,50 +45,77 @@ export async function executeAction(
 ): Promise<ActionResult> {
   const { action, data } = response;
 
+  let result: ActionResult;
   try {
-    switch (action) {
-      case "record_payment":
-        return await handleRecordPayment(data);
-
-      case "create_contract":
-        return await handleCreateContract(data);
-
-      case "add_project_expense":
-        return await handleAddProjectExpense(data);
-
-      case "query_balance":
-        return await handleQueryBalance(data);
-
-      case "query_report":
-        return await handleQueryReport(data);
-
-      case "send_reminder":
-        return await handleSendReminder(data);
-
-      case "mark_check_bounced":
-        return await handleCheckBounced(data);
-
-      case "renew_contract":
-        return await handleRenewContract(data);
-
-      case "query_reliability":
-        return await handleQueryReliability(data);
-
-      case "compare_checks":
-        return await handleCompareChecks(data);
-
-      default:
-        return {
-          success: true,
-          message: response.response_message || "הפעולה לא מוכרת.",
-        };
-    }
+    result = await dispatch(action, data, response);
   } catch (err) {
     console.error(`executeAction(${action}) failed:`, err);
-    return {
+    result = {
       success: false,
       message: `שגיאה בביצוע: ${err instanceof Error ? err.message : "שגיאה לא ידועה"}`,
     };
+  }
+
+  // Fire-and-forget notification on success — never block the user reply.
+  if (result.success) void maybeNotify(action, data);
+
+  return result;
+}
+
+async function dispatch(
+  action: string,
+  data: Record<string, unknown>,
+  response: AIAgentResponse
+): Promise<ActionResult> {
+  switch (action) {
+    case "record_payment": return handleRecordPayment(data);
+    case "create_contract": return handleCreateContract(data);
+    case "add_project_expense": return handleAddProjectExpense(data);
+    case "query_balance": return handleQueryBalance(data);
+    case "query_report": return handleQueryReport(data);
+    case "send_reminder": return handleSendReminder(data);
+    case "mark_check_bounced": return handleCheckBounced(data);
+    case "renew_contract": return handleRenewContract(data);
+    case "query_reliability": return handleQueryReliability(data);
+    case "compare_checks": return handleCompareChecks(data);
+    case "create_project": return handleCreateProject(data);
+    case "list_projects": return handleListProjects();
+    case "delete_project": return handleDeleteProject(data);
+    case "list_overdue": return handleListOverdue();
+    default:
+      return {
+        success: true,
+        message: response.response_message || "הפעולה לא מוכרת.",
+      };
+  }
+}
+
+async function maybeNotify(action: string, data: Record<string, unknown>) {
+  try {
+    const titleFn = NOTIFY_TITLE[action];
+    const entityType = NOTIFY_ENTITY_TYPE[action];
+    if (!titleFn || !entityType) return;
+
+    // Best effort: resolve entity_id when possible
+    let entityId: string | null = null;
+    if (entityType === "tenant" || entityType === "payment" || entityType === "contract" || entityType === "check") {
+      const t = await resolveTenant(data);
+      if (t) entityId = t.id;
+    }
+    if (!entityId && entityType === "project") {
+      const p = await resolveProject(data);
+      if (p) entityId = p.id;
+    }
+    if (!entityId) entityId = "00000000-0000-0000-0000-000000000000";
+
+    await notifyAction({
+      type: action,
+      entity_type: entityType,
+      entity_id: entityId,
+      title: titleFn(data),
+    });
+  } catch (err) {
+    console.error("maybeNotify failed:", err);
   }
 }
 
@@ -705,4 +759,240 @@ async function logAction(
     source,
     performed_by: "whatsapp_agent",
   });
+}
+
+// ─── create_project ──────────────────────────────────────────────
+async function handleCreateProject(
+  data: Record<string, unknown>
+): Promise<ActionResult> {
+  const name = String(data.project_name || data.name || "").trim();
+  const totalBudget = Number(data.total_budget || data.budget || 0);
+  const status = String(data.status || "active") as "planning" | "active" | "completed";
+  const address = data.address ? String(data.address) : null;
+  const description = data.description ? String(data.description) : null;
+
+  if (!name) return { success: false, message: "חסר שם פרויקט." };
+
+  // Pick first legal entity if not specified
+  let legalEntityId = data.legal_entity_id ? String(data.legal_entity_id) : null;
+  if (!legalEntityId) {
+    const { data: ents } = await supabase
+      .from("legal_entities")
+      .select("id")
+      .limit(1);
+    legalEntityId = ents?.[0]?.id || null;
+  }
+  if (!legalEntityId) return { success: false, message: "אין ישות משפטית במערכת." };
+
+  const { data: project, error } = await supabase
+    .from("projects")
+    .insert({
+      name,
+      legal_entity_id: legalEntityId,
+      address,
+      description,
+      total_budget: totalBudget,
+      status,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+
+  await logAction("project", project.id, "project_created", `נפתח פרויקט ${name}`, "whatsapp");
+
+  let msg = `📁 פרויקט נוצר: ${name}\n`;
+  if (totalBudget > 0) msg += `• תקציב: ₪${totalBudget.toLocaleString()}\n`;
+  msg += `• סטטוס: ${status === "active" ? "פעיל" : status === "planning" ? "בתכנון" : "הושלם"}`;
+  return { success: true, message: msg };
+}
+
+// ─── list_projects ───────────────────────────────────────────────
+async function handleListProjects(): Promise<ActionResult> {
+  const { data: projects } = await supabase
+    .from("projects")
+    .select(`id, name, status, total_budget, expenses:project_expenses(amount)`)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (!projects || projects.length === 0)
+    return { success: true, message: "אין פרויקטים פעילים." };
+
+  let msg = `📁 פרויקטים (${projects.length}):\n`;
+  for (const p of projects) {
+    const spent = ((p.expenses as { amount: number }[]) || []).reduce(
+      (s, e) => s + Number(e.amount || 0),
+      0
+    );
+    const remaining = Number(p.total_budget || 0) - spent;
+    const statusHe =
+      p.status === "active" ? "פעיל" : p.status === "planning" ? "בתכנון" : "הושלם";
+    msg += `\n• ${p.name} (${statusHe})\n`;
+    msg += `  תקציב ₪${Number(p.total_budget || 0).toLocaleString()} · `;
+    msg += `הוצאות ₪${spent.toLocaleString()} · `;
+    msg += `נותר ₪${remaining.toLocaleString()}`;
+  }
+  return { success: true, message: msg };
+}
+
+// ─── delete_project ──────────────────────────────────────────────
+async function handleDeleteProject(
+  data: Record<string, unknown>
+): Promise<ActionResult> {
+  const project = await resolveProject(data);
+  if (!project)
+    return { success: false, message: `לא מצאתי פרויקט "${data.project_name}".` };
+
+  const { count } = await supabase
+    .from("project_expenses")
+    .select("id", { count: "exact", head: true })
+    .eq("project_id", project.id);
+
+  if ((count || 0) > 0) {
+    return {
+      success: false,
+      message: `לפרויקט "${project.name}" יש ${count} הוצאות. מחק אותן קודם או סגור את הפרויקט במקום למחוק.`,
+    };
+  }
+
+  const { error } = await supabase.from("projects").delete().eq("id", project.id);
+  if (error) throw error;
+
+  await logAction("project", project.id, "project_deleted", `פרויקט נמחק: ${project.name}`, "whatsapp");
+  return { success: true, message: `🗑 הפרויקט "${project.name}" נמחק.` };
+}
+
+// ─── list_overdue ────────────────────────────────────────────────
+async function handleListOverdue(): Promise<ActionResult> {
+  const { data: rows } = await supabase
+    .from("payment_schedule")
+    .select("month_year, expected_amount, tenant:tenants(full_name)")
+    .eq("status", "overdue")
+    .order("due_date", { ascending: true })
+    .limit(50);
+
+  if (!rows || rows.length === 0)
+    return { success: true, message: "✅ אין דיירים בפיגור — הכל מסולק!" };
+
+  const byTenant = new Map<string, { months: string[]; total: number }>();
+  for (const r of rows) {
+    const t = r.tenant as unknown as { full_name: string } | null;
+    const name = t?.full_name || "ללא שם";
+    const cur = byTenant.get(name) || { months: [], total: 0 };
+    cur.months.push(r.month_year);
+    cur.total += Number(r.expected_amount || 0);
+    byTenant.set(name, cur);
+  }
+
+  let msg = `🔴 דיירים בפיגור (${byTenant.size}):\n`;
+  for (const [name, info] of byTenant) {
+    msg += `\n• ${name} — ₪${info.total.toLocaleString()} (${info.months.join(", ")})`;
+  }
+  return { success: true, message: msg };
+}
+
+// ─── WhatsApp image (check) handler ──────────────────────────────
+/**
+ * Receive a check image via WhatsApp.
+ *
+ * If the caption mentions a tenant ("של יוסי כהן" / "צ'ק של יוסי") we
+ * resolve them, scan the image with Claude Vision, and call the same
+ * record-check-as-payment pipeline that the web upload uses (creates
+ * the check, the payment, and auto-issues a receipt). The reply
+ * summarises what was created.
+ */
+export async function handleWhatsAppCheckImage(params: {
+  phone: string;
+  imageUrl: string;
+  caption: string;
+  senderName?: string;
+}): Promise<ActionResult> {
+  const caption = params.caption || "";
+
+  // Try to extract tenant name from caption.
+  // Supported phrasings:
+  //  "צ'ק של יוסי כהן"
+  //  "של יוסי"
+  //  "תשלום עבור יוסי כהן"
+  //  bare name
+  const nameMatch =
+    caption.match(/(?:צ['׳]?ק|תשלום)\s+(?:של|עבור|מ-?)\s+(.+)/i) ||
+    caption.match(/של\s+(.+)/i) ||
+    caption.match(/עבור\s+(.+)/i);
+
+  const tenantName = nameMatch?.[1]?.trim() || caption.trim();
+
+  if (!tenantName) {
+    return {
+      success: false,
+      message:
+        "📸 קיבלתי תמונה אבל לא ידוע של מי הצ'ק. שלח שוב עם כיתוב כמו: \"צ'ק של יוסי כהן\".",
+    };
+  }
+
+  const tenant = await resolveTenant({ tenant_name: tenantName });
+  if (!tenant)
+    return { success: false, message: `📸 לא מצאתי דייר בשם "${tenantName}". בדוק את האיות.` };
+  if (!tenant.contract_id)
+    return { success: false, message: `📸 ל${tenant.full_name} אין חוזה פעיל — לא ניתן לרשום צ'ק.` };
+
+  // Scan the image
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+  const scanRes = await fetch(`${baseUrl}/api/checks/scan-from-url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image_urls: [params.imageUrl] }),
+  });
+
+  if (!scanRes.ok) {
+    const err = await scanRes.text();
+    return { success: false, message: `📸 שגיאה בסריקת התמונה: ${err.slice(0, 100)}` };
+  }
+  const { checks } = (await scanRes.json()) as {
+    checks: {
+      check_number: string | null;
+      bank_name: string | null;
+      branch_number: string | null;
+      account_number: string | null;
+      amount: number | null;
+      due_date: string | null;
+    }[];
+  };
+
+  if (!checks || checks.length === 0)
+    return { success: false, message: "📸 לא הצלחתי לזהות פרטי צ'ק בתמונה." };
+
+  let receiptCount = 0;
+  let recordedCount = 0;
+  const errors: string[] = [];
+
+  for (const c of checks) {
+    if (!c.check_number || !c.amount || !c.due_date) {
+      errors.push("צ'ק חסר פרטים (מספר/סכום/תאריך)");
+      continue;
+    }
+    try {
+      const r = await recordCheckAsPayment({
+        tenant_id: tenant.id,
+        contract_id: tenant.contract_id!,
+        check_number: c.check_number,
+        bank_name: c.bank_name,
+        branch_number: c.branch_number,
+        account_number: c.account_number,
+        amount: c.amount,
+        due_date: c.due_date,
+        for_month: dueDateToForMonth(c.due_date),
+        source: "whatsapp_agent",
+      });
+      recordedCount++;
+      if (r.receipt_doc_number) receiptCount++;
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  let msg = `📸 ${tenant.full_name}:\n`;
+  msg += `• ${recordedCount} צ'קים נרשמו ושולבו בתשלומים\n`;
+  if (receiptCount > 0) msg += `• ${receiptCount} קבלות הופקו אוטומטית\n`;
+  if (errors.length > 0) msg += `• ${errors.length} שגיאות`;
+  return { success: true, message: msg };
 }
