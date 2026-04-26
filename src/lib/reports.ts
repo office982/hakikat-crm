@@ -121,6 +121,123 @@ export function formatMonthlySummaryHe(s: MonthlySummary): string {
   return msg;
 }
 
+export interface TenantMonthlySummary {
+  tenant_id: string;
+  tenant_name: string;
+  phone: string;
+  whatsapp: string | null;
+  month_year: string;
+  expected: number;
+  paid: number;
+  outstanding: number;
+  status: "paid" | "partial" | "overdue" | "pending" | "no_schedule";
+  bounced_check_count: number;
+  next_due_date: string | null;
+  next_due_amount: number;
+}
+
+/**
+ * Build a per-tenant monthly summary suitable for WhatsApp.
+ * Returns null if the tenant has no schedule for that month.
+ */
+export async function buildTenantMonthlySummary(
+  tenantId: string,
+  monthYear: string
+): Promise<TenantMonthlySummary | null> {
+  const { data: tenant } = await supabase
+    .from("tenants")
+    .select("id, full_name, phone, whatsapp")
+    .eq("id", tenantId)
+    .single();
+  if (!tenant) return null;
+
+  const { data: row } = await supabase
+    .from("payment_schedule")
+    .select("expected_amount, status, due_date")
+    .eq("tenant_id", tenantId)
+    .eq("month_year", monthYear)
+    .maybeSingle();
+
+  if (!row) {
+    return {
+      tenant_id: tenant.id,
+      tenant_name: tenant.full_name,
+      phone: tenant.phone,
+      whatsapp: tenant.whatsapp,
+      month_year: monthYear,
+      expected: 0,
+      paid: 0,
+      outstanding: 0,
+      status: "no_schedule",
+      bounced_check_count: 0,
+      next_due_date: null,
+      next_due_amount: 0,
+    };
+  }
+
+  const expected = Number(row.expected_amount || 0);
+  const { data: payments } = await supabase
+    .from("payments")
+    .select("amount")
+    .eq("tenant_id", tenantId)
+    .eq("month_paid_for", monthYear);
+  const paid = (payments || []).reduce((s, p) => s + Number(p.amount || 0), 0);
+  const outstanding = Math.max(0, expected - paid);
+
+  const { count: bouncedCount } = await supabase
+    .from("checks")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .eq("status", "bounced");
+
+  // Next upcoming due date
+  const today = new Date().toISOString().split("T")[0];
+  const { data: nextRow } = await supabase
+    .from("payment_schedule")
+    .select("due_date, expected_amount")
+    .eq("tenant_id", tenantId)
+    .in("status", ["pending", "overdue", "partial"])
+    .gte("due_date", today)
+    .order("due_date", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  return {
+    tenant_id: tenant.id,
+    tenant_name: tenant.full_name,
+    phone: tenant.phone,
+    whatsapp: tenant.whatsapp,
+    month_year: monthYear,
+    expected,
+    paid,
+    outstanding,
+    status: row.status as TenantMonthlySummary["status"],
+    bounced_check_count: bouncedCount || 0,
+    next_due_date: nextRow?.due_date || null,
+    next_due_amount: Number(nextRow?.expected_amount || 0),
+  };
+}
+
+export function formatTenantMonthlySummaryHe(s: TenantMonthlySummary): string {
+  let msg = `שלום ${s.tenant_name}, סיכום ${s.month_year}:\n`;
+  if (s.status === "no_schedule") {
+    msg += `אין רישום תשלום עבור החודש הזה.\n`;
+  } else if (s.status === "paid") {
+    msg += `✅ שולם במלואו — ₪${s.paid.toLocaleString()}.\n`;
+  } else if (s.outstanding > 0) {
+    msg += `• צפוי: ₪${s.expected.toLocaleString()}\n`;
+    msg += `• שולם: ₪${s.paid.toLocaleString()}\n`;
+    msg += `• יתרה לתשלום: ₪${s.outstanding.toLocaleString()}\n`;
+  } else {
+    msg += `• שולם: ₪${s.paid.toLocaleString()} (חלקי).\n`;
+  }
+  if (s.next_due_date && s.next_due_amount > 0) {
+    msg += `• הבא לתשלום: ${s.next_due_date} — ₪${s.next_due_amount.toLocaleString()}\n`;
+  }
+  msg += `\nתודה — קבוצת חקיקת.`;
+  return msg;
+}
+
 function addDays(d: Date, n: number): Date {
   const r = new Date(d);
   r.setDate(r.getDate() + n);

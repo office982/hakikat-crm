@@ -3,7 +3,7 @@ import type { EasydoWebhookEvent } from "@/lib/api/easydo";
 import { verifyEasydoWebhook } from "@/lib/api/easydo";
 import { supabase } from "@/lib/supabase";
 import { saveContractToDrive } from "@/lib/api/google-drive";
-import { sendWhatsAppMessage } from "@/lib/api/wati";
+import { sendNotification } from "@/lib/notifications";
 
 /**
  * EasyDo Webhook — triggered when a document is signed.
@@ -40,15 +40,8 @@ export async function POST(request: NextRequest) {
     }
 
     if (event.status !== "signed") {
-      // sent / viewed — just log for visibility
-      await supabase.from("action_logs").insert({
-        entity_type: "contract",
-        entity_id: await lookupContractId(event.document_id) || event.document_id,
-        action: `easydo_${event.status}`,
-        description: `EasyDo status: ${event.status}`,
-        source: "easydo",
-        performed_by: "easydo",
-      });
+      // sent / viewed / reminder — log + best-effort tenant ping
+      await handleStatusUpdate(event);
       return NextResponse.json({ received: true });
     }
 
@@ -61,15 +54,6 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-async function lookupContractId(easydoDocumentId: string): Promise<string | null> {
-  const { data } = await supabase
-    .from("contracts")
-    .select("id")
-    .eq("easydo_document_id", easydoDocumentId)
-    .maybeSingle();
-  return data?.id || null;
 }
 
 async function handleSigned(event: EasydoWebhookEvent) {
@@ -125,7 +109,7 @@ async function handleSigned(event: EasydoWebhookEvent) {
     return;
   }
 
-  // 5. WhatsApp welcome
+  // 5. WhatsApp welcome — tracked notification with fallback channels.
   if (tenant?.phone) {
     const phoneForWati = (tenant.whatsapp || tenant.phone).replace(/^0/, "972");
     const welcomeMsg =
@@ -133,37 +117,126 @@ async function handleSigned(event: EasydoWebhookEvent) {
       `החוזה נחתם בהצלחה ונכנס לתוקף.\n` +
       (driveUrl ? `העתק החוזה: ${driveUrl}\n` : "") +
       `בכל שאלה — אנחנו כאן. תודה, קבוצת חקיקת.`;
-    try {
-      await sendWhatsAppMessage(phoneForWati, welcomeMsg);
-    } catch (waErr) {
-      console.error("[easydo] WhatsApp welcome failed:", waErr);
-    }
+    await sendNotification({
+      type: "contract_signed",
+      entity_type: "contract",
+      entity_id: contract.id,
+      title: `✅ חוזה נחתם — ${tenant.full_name}`,
+      message: welcomeMsg,
+      recipient: phoneForWati,
+      channel: "whatsapp",
+    });
   }
 }
 
-async function handleDeclined(event: EasydoWebhookEvent) {
-  const contractId = await lookupContractId(event.document_id);
-  if (!contractId) return;
-
-  await supabase
+/**
+ * Non-terminal status update (sent / viewed / reminder).
+ * Log + ping the tenant on WhatsApp (best-effort) so they know
+ * what's happening with their contract.
+ */
+async function handleStatusUpdate(event: EasydoWebhookEvent) {
+  const { data: contract } = await supabase
     .from("contracts")
-    .update({ status: "cancelled", updated_at: new Date().toISOString() })
-    .eq("id", contractId);
+    .select(`id, tenant:tenants(id, full_name, phone, whatsapp)`)
+    .eq("easydo_document_id", event.document_id)
+    .maybeSingle();
+
+  const contractId = contract?.id || event.document_id;
 
   await supabase.from("action_logs").insert({
     entity_type: "contract",
     entity_id: contractId,
+    action: `easydo_${event.status}`,
+    description: `EasyDo status: ${event.status}`,
+    source: "easydo",
+    performed_by: "easydo",
+  });
+
+  if (!contract?.id) return;
+
+  const tenant = contract.tenant as unknown as {
+    id: string;
+    full_name: string;
+    phone: string;
+    whatsapp: string | null;
+  } | null;
+  if (!tenant?.phone) return;
+
+  // Hebrew message per status. Skip noisy "viewed" pings.
+  let msg: string | null = null;
+  let title: string | null = null;
+  if (event.status === "sent") {
+    title = `📨 חוזה נשלח — ${tenant.full_name}`;
+    msg =
+      `שלום ${tenant.full_name}, החוזה נשלח אליך לחתימה דיגיטלית. ` +
+      `אנא בדוק את האימייל / SMS שקיבלת מ-EasyDo. ` +
+      `בכל שאלה — אנחנו כאן.`;
+  }
+
+  if (msg && title) {
+    const phoneForWati = (tenant.whatsapp || tenant.phone).replace(/^0/, "972");
+    await sendNotification({
+      type: `contract_${event.status}`,
+      entity_type: "contract",
+      entity_id: contract.id,
+      title,
+      message: msg,
+      recipient: phoneForWati,
+      channel: "whatsapp",
+    });
+  }
+}
+
+async function handleDeclined(event: EasydoWebhookEvent) {
+  const { data: contract } = await supabase
+    .from("contracts")
+    .select(`id, tenant:tenants(id, full_name, phone, whatsapp)`)
+    .eq("easydo_document_id", event.document_id)
+    .maybeSingle();
+  if (!contract) return;
+
+  await supabase
+    .from("contracts")
+    .update({ status: "cancelled", updated_at: new Date().toISOString() })
+    .eq("id", contract.id);
+
+  await supabase.from("action_logs").insert({
+    entity_type: "contract",
+    entity_id: contract.id,
     action: "contract_declined",
     description: `${event.signer_name || "החותם"} דחה את החוזה דרך EasyDo.`,
     source: "easydo",
     performed_by: "easydo",
   });
 
+  // Admin alert (dashboard)
   await supabase.from("notifications").insert({
     type: "contract_declined",
     entity_type: "contract",
-    entity_id: contractId,
+    entity_id: contract.id,
     title: `🔴 החוזה נדחה — ${event.signer_name || "דייר"}`,
     message: `החותם דחה את החוזה ב-EasyDo. יש לחזור לדייר או לפתוח חוזה חדש.`,
   });
+
+  // Tenant ping — confirm the rejection so they know we received it.
+  const tenant = contract.tenant as unknown as {
+    id: string;
+    full_name: string;
+    phone: string;
+    whatsapp: string | null;
+  } | null;
+  if (tenant?.phone) {
+    const phoneForWati = (tenant.whatsapp || tenant.phone).replace(/^0/, "972");
+    await sendNotification({
+      type: "contract_declined_tenant",
+      entity_type: "contract",
+      entity_id: contract.id,
+      title: `חוזה בוטל — ${tenant.full_name}`,
+      message:
+        `שלום ${tenant.full_name}, ראינו שהחוזה נדחה. ` +
+        `נחזור אליך בהקדם להבהרות. תודה — קבוצת חקיקת.`,
+      recipient: phoneForWati,
+      channel: "whatsapp",
+    });
+  }
 }

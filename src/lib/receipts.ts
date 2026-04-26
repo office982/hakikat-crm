@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { createMorningDocument } from "@/lib/api/morning";
+import { saveReceiptToDrive, isDriveBackupEnabled } from "@/lib/api/google-drive";
 
 const SKIPPED_ENTITIES = ["חקיקת פרטי", "חקיקת עסקי/פרטי"];
 
@@ -111,6 +112,19 @@ export async function issueReceiptForPayment(paymentId: string): Promise<IssueRe
       source: "system",
       performed_by: "system",
     });
+
+    // Best-effort Drive backup of the receipt PDF
+    if (doc.url && tenant.full_name && (await isDriveBackupEnabled("drive_backup_receipts_enabled"))) {
+      try {
+        await saveReceiptToDrive({
+          tenantName: tenant.full_name,
+          pdfUrl: doc.url,
+          fileName: `receipt_${doc.number}_${payment.month_paid_for.replace("/", "-")}.pdf`,
+        });
+      } catch (err) {
+        console.error("[receipts] drive backup failed:", err);
+      }
+    }
 
     return { success: true, doc_id: doc.id, doc_number: doc.number, doc_url: doc.url };
   } catch (err) {

@@ -8,6 +8,7 @@ interface ScannedCheck {
   account_number: string | null;
   amount: number | null;
   due_date: string | null;
+  image_url?: string | null;
 }
 
 interface Body {
@@ -52,6 +53,7 @@ export async function POST(request: NextRequest) {
           due_date: c.due_date,
           for_month: dueDateToForMonth(c.due_date),
           source: body.source || "manual",
+          image_url: c.image_url ?? null,
         });
         results.push({ ...r, check_number: c.check_number, for_month: dueDateToForMonth(c.due_date) });
       } catch (err) {

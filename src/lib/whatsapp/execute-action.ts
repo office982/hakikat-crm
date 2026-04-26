@@ -82,6 +82,7 @@ async function dispatch(
     case "list_projects": return handleListProjects();
     case "delete_project": return handleDeleteProject(data);
     case "list_overdue": return handleListOverdue();
+    case "query_project_status": return handleQueryProjectStatus(data);
     default:
       return {
         success: true,
@@ -861,6 +862,79 @@ async function handleDeleteProject(
   return { success: true, message: `🗑 הפרויקט "${project.name}" נמחק.` };
 }
 
+// ─── query_project_status ────────────────────────────────────────
+async function handleQueryProjectStatus(
+  data: Record<string, unknown>
+): Promise<ActionResult> {
+  // Don't filter by status — user may ask about planning/completed projects too.
+  const name = String(data.project_name || "").trim();
+  if (!name) return { success: false, message: "חסר שם פרויקט." };
+
+  const { data: matches } = await supabase
+    .from("projects")
+    .select("id, name")
+    .ilike("name", `%${name}%`)
+    .limit(1);
+  const project = matches?.[0];
+  if (!project)
+    return { success: false, message: `לא מצאתי פרויקט "${name}".` };
+
+  const { data: full } = await supabase
+    .from("projects")
+    .select("id, name, status, total_budget, address, start_date, end_date")
+    .eq("id", project.id)
+    .single();
+
+  if (!full) return { success: false, message: "שגיאה בטעינת הפרויקט." };
+
+  const { data: expenses } = await supabase
+    .from("project_expenses")
+    .select("amount, status, supplier_name, supplier_id, suppliers(name)")
+    .eq("project_id", project.id);
+
+  const totalSpent = (expenses || []).reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalUnpaid = (expenses || [])
+    .filter((e) => e.status === "unpaid")
+    .reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalBudget = Number(full.total_budget || 0);
+  const remaining = totalBudget - totalSpent;
+  const percent = totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0;
+  const unpaidCount = (expenses || []).filter((e) => e.status === "unpaid").length;
+
+  // Top suppliers by amount
+  const bySupplier = new Map<string, number>();
+  for (const e of expenses || []) {
+    const sup = e as Record<string, unknown>;
+    const name =
+      (sup.suppliers as { name: string } | null)?.name ||
+      (sup.supplier_name as string) ||
+      "ללא שם";
+    bySupplier.set(name, (bySupplier.get(name) || 0) + Number(e.amount || 0));
+  }
+  const topSuppliers = Array.from(bySupplier.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3);
+
+  const statusHe =
+    full.status === "active" ? "פעיל" : full.status === "planning" ? "בתכנון" : "הושלם";
+
+  let msg = `📁 ${full.name} (${statusHe}):\n`;
+  if (full.address) msg += `• כתובת: ${full.address}\n`;
+  msg += `• תקציב: ₪${totalBudget.toLocaleString()}\n`;
+  msg += `• הוצאה בפועל: ₪${totalSpent.toLocaleString()} (${percent}%)\n`;
+  msg += `• נותר: ₪${remaining.toLocaleString()}\n`;
+  if (unpaidCount > 0) {
+    msg += `• 🔴 חשבוניות לא משולמות: ${unpaidCount} (₪${totalUnpaid.toLocaleString()})\n`;
+  }
+  if (topSuppliers.length > 0) {
+    msg += `\nספקים עיקריים:`;
+    for (const [name, amount] of topSuppliers) {
+      msg += `\n  • ${name} — ₪${amount.toLocaleString()}`;
+    }
+  }
+  return { success: true, message: msg };
+}
+
 // ─── list_overdue ────────────────────────────────────────────────
 async function handleListOverdue(): Promise<ActionResult> {
   const { data: rows } = await supabase
@@ -982,6 +1056,7 @@ export async function handleWhatsAppCheckImage(params: {
         due_date: c.due_date,
         for_month: dueDateToForMonth(c.due_date),
         source: "whatsapp_agent",
+        image_url: params.imageUrl,
       });
       recordedCount++;
       if (r.receipt_doc_number) receiptCount++;

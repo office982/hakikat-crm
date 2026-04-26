@@ -267,6 +267,7 @@ export interface PropertyInput {
   address?: string | null;
   city?: string | null;
   property_type?: "residential" | "commercial" | "mixed";
+  suggested_rent?: number | null;
 }
 
 export function useCreateProperty() {
@@ -284,6 +285,7 @@ export function useCreateProperty() {
           address: input.address ?? null,
           city: input.city ?? null,
           property_type: input.property_type ?? "residential",
+          suggested_rent: input.suggested_rent ?? null,
         })
         .select()
         .single();

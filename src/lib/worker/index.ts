@@ -11,6 +11,10 @@ import {
   handleReliabilityRecompute,
 } from "./jobs/reliability-recompute";
 import { DRIVE_BACKUP_JOB, handleDriveBackup } from "./jobs/drive-backup";
+import {
+  NOTIFICATION_RETRY_JOB,
+  handleNotificationRetry,
+} from "./jobs/notification-retry";
 
 let started = false;
 
@@ -53,6 +57,10 @@ export async function startWorker() {
       await handleDriveBackup();
     });
 
+    await boss.work(NOTIFICATION_RETRY_JOB, { localConcurrency: 1 }, async () => {
+      await handleNotificationRetry();
+    });
+
     // ── Schedule recurring jobs (all in Asia/Jerusalem) ──
     // Daily 08:00 — alerts
     await boss.schedule(DAILY_ALERTS_JOB, "0 8 * * *", undefined, {
@@ -79,8 +87,13 @@ export async function startWorker() {
       tz: "Asia/Jerusalem",
     });
 
+    // Every 30 minutes — retry failed notification deliveries
+    await boss.schedule(NOTIFICATION_RETRY_JOB, "*/30 * * * *", undefined, {
+      tz: "Asia/Jerusalem",
+    });
+
     console.log(
-      "[worker] Jobs registered: daily-alerts, weekly-report, monthly-report, reliability-recompute, drive-backup"
+      "[worker] Jobs registered: daily-alerts, weekly-report, monthly-report, reliability-recompute, drive-backup, notification-retry"
     );
   } catch (err) {
     console.error("[worker] Failed to start:", err);

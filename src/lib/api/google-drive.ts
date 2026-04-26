@@ -174,3 +174,86 @@ export async function saveContractToDrive(
   await makeFilePublic(file.id);
   return file.web_view_link;
 }
+
+/**
+ * Detect mime type from a URL extension. Conservative — defaults
+ * to application/octet-stream and lets caller decide if that's OK.
+ */
+function mimeFromUrl(url: string): string {
+  const lower = url.toLowerCase().split("?")[0];
+  if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".webp")) return "image/webp";
+  return "application/octet-stream";
+}
+
+/**
+ * Save a check image (or any tenant artifact) to Drive under
+ * tenant-folder / "Checks". Best-effort — caller catches errors.
+ * Returns the Drive web view link.
+ */
+export async function saveCheckImageToDrive(params: {
+  tenantName: string;
+  imageUrl: string;
+  fileName: string;
+}): Promise<string> {
+  const rootFolderId = GOOGLE_DRIVE_ROOT_FOLDER_ID;
+  if (!rootFolderId) throw new Error("Google Drive root folder not configured");
+
+  const res = await fetch(params.imageUrl);
+  if (!res.ok) throw new Error(`fetch image ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+
+  const tenantFolderId = await ensureFolder(params.tenantName, rootFolderId);
+  const checksFolderId = await ensureFolder("Checks", tenantFolderId);
+
+  const file = await uploadToDriveFolder({
+    folderId: checksFolderId,
+    fileName: params.fileName,
+    mimeType: mimeFromUrl(params.imageUrl),
+    data: buf,
+  });
+  await makeFilePublic(file.id);
+  return file.web_view_link;
+}
+
+/**
+ * Save a receipt PDF (downloaded from iCount/Morning) to Drive
+ * under tenant-folder / "Receipts".
+ */
+export async function saveReceiptToDrive(params: {
+  tenantName: string;
+  pdfUrl: string;
+  fileName: string;
+}): Promise<string> {
+  const rootFolderId = GOOGLE_DRIVE_ROOT_FOLDER_ID;
+  if (!rootFolderId) throw new Error("Google Drive root folder not configured");
+
+  const res = await fetch(params.pdfUrl);
+  if (!res.ok) throw new Error(`fetch receipt ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+
+  const tenantFolderId = await ensureFolder(params.tenantName, rootFolderId);
+  const receiptsFolderId = await ensureFolder("Receipts", tenantFolderId);
+
+  const file = await uploadToDriveFolder({
+    folderId: receiptsFolderId,
+    fileName: params.fileName,
+    mimeType: "application/pdf",
+    data: buf,
+  });
+  await makeFilePublic(file.id);
+  return file.web_view_link;
+}
+
+/**
+ * Read a single feature flag from settings. Returns true unless
+ * explicitly "false" — failure-safe default.
+ */
+export async function isDriveBackupEnabled(key: string): Promise<boolean> {
+  const { supabase } = await import("@/lib/supabase");
+  const { data } = await supabase.from("settings").select("value").eq("key", key).single();
+  return data?.value !== "false";
+}

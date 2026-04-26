@@ -27,6 +27,7 @@ export interface Property {
   address: string | null;
   city: string | null;
   property_type: "residential" | "commercial" | "mixed";
+  suggested_rent: number | null;
   created_at: string;
   complex?: Complex;
   legal_entity?: LegalEntity;
@@ -226,7 +227,24 @@ export interface Notification {
   message: string | null;
   is_read: boolean;
   due_date: string | null;
+  delivery_status: "pending" | "sent" | "failed" | "delivered" | null;
+  sent_at: string | null;
+  failed_at: string | null;
+  retry_count: number;
+  last_error: string | null;
+  recipient: string | null;
+  channel: "whatsapp" | "email" | "sms" | "push" | null;
   created_at: string;
+}
+
+export interface NotificationAttempt {
+  id: string;
+  notification_id: string;
+  channel: "whatsapp" | "email" | "sms" | "push";
+  recipient: string;
+  status: "sent" | "failed";
+  error: string | null;
+  attempted_at: string;
 }
 
 export interface Setting {

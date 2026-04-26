@@ -36,6 +36,8 @@ import { LegalEntityFormModal } from "./LegalEntityFormModal";
 import { ComplexFormModal } from "./ComplexFormModal";
 import { PropertyFormModal } from "./PropertyFormModal";
 import { UnitFormModal } from "./UnitFormModal";
+import { OccupancyMap } from "./OccupancyMap";
+import { formatCurrency } from "@/lib/utils";
 
 type DeleteTarget =
   | { kind: "entity"; id: string; name: string }
@@ -49,6 +51,7 @@ export function PropertiesContent() {
   const [search, setSearch] = useState("");
   const [expandedComplex, setExpandedComplex] = useState<string | null>(null);
   const [expandedProperty, setExpandedProperty] = useState<string | null>(null);
+  const [view, setView] = useState<"tree" | "map">("tree");
 
   // Modal state
   const [entityModal, setEntityModal] = useState<{ open: boolean; entity: LegalEntity | null }>({ open: false, entity: null });
@@ -155,6 +158,20 @@ export function PropertiesContent() {
           <div className="flex gap-3 flex-wrap">
             <SearchInput value={search} onChange={setSearch} placeholder="חיפוש נכס / יחידה..." className="w-64" />
             <Select options={entityOptions} value={entityFilter} onChange={(e) => setEntityFilter(e.target.value)} className="w-52" />
+            <div className="flex gap-1 rounded-lg border border-border p-1">
+              <button
+                onClick={() => setView("tree")}
+                className={`px-3 py-1 text-xs rounded ${view === "tree" ? "bg-primary text-white" : "text-muted"}`}
+              >
+                רשימה
+              </button>
+              <button
+                onClick={() => setView("map")}
+                className={`px-3 py-1 text-xs rounded ${view === "map" ? "bg-primary text-white" : "text-muted"}`}
+              >
+                מפת תפוסה
+              </button>
+            </div>
           </div>
           <div className="flex gap-2 flex-wrap">
             <Button size="sm" variant="outline" onClick={() => setEntityModal({ open: true, entity: null })}>
@@ -204,14 +221,23 @@ export function PropertiesContent() {
         </Card>
       )}
 
+      {/* Map View */}
+      {view === "map" && configured && filteredComplexes.length > 0 && (
+        <OccupancyMap
+          complexes={filteredComplexes}
+          properties={properties}
+          units={units}
+        />
+      )}
+
       {/* Tree View */}
-      {!configured || filteredComplexes.length === 0 ? (
+      {view === "tree" && (!configured || filteredComplexes.length === 0) ? (
         <EmptyState
           icon={Building2}
           title="לא נמצאו נכסים"
           description={configured ? "נסה לשנות את הסינון, או צור מתחם חדש" : "חבר Supabase כדי לראות נכסים"}
         />
-      ) : (
+      ) : view === "map" ? null : (
         <div className="space-y-3">
           {filteredComplexes.map((complex) => {
             const complexProps = properties.filter((p) => p.complex_id === complex.id);
@@ -296,6 +322,11 @@ export function PropertiesContent() {
                               </Badge>
                             </div>
                             <div className="flex items-center gap-3">
+                              {prop.suggested_rent ? (
+                                <span className="text-xs text-success font-medium" dir="ltr" title="מחיר שכירות מוצע">
+                                  {formatCurrency(prop.suggested_rent)}
+                                </span>
+                              ) : null}
                               <span className="text-xs text-muted">{propOccupied}/{propUnits.length} מושכרות</span>
                               <div onClick={stop} className="flex gap-1">
                                 <button

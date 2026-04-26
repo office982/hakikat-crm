@@ -65,14 +65,105 @@ export function useProjectExpenses(projectId?: string) {
 
       const { data, error } = await supabase
         .from("project_expenses")
-        .select("*")
+        .select("*, supplier:suppliers(id, name)")
         .eq("project_id", projectId)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      return data as ProjectExpense[];
+      return data as (ProjectExpense & { supplier?: { id: string; name: string } | null })[];
     },
     enabled: !!projectId,
+  });
+}
+
+export interface ProjectExpenseInput {
+  project_id: string;
+  supplier_id?: string | null;
+  supplier_name?: string | null;
+  description?: string | null;
+  amount: number;
+  invoice_date?: string | null;
+  due_date?: string | null;
+  status?: "unpaid" | "paid" | "partial";
+  invoice_number?: string | null;
+  notes?: string | null;
+}
+
+function invalidateExpenses(qc: ReturnType<typeof useQueryClient>, projectId?: string) {
+  qc.invalidateQueries({ queryKey: ["project_expenses", projectId] });
+  qc.invalidateQueries({ queryKey: ["projects"] });
+  qc.invalidateQueries({ queryKey: ["project", projectId] });
+}
+
+export function useCreateProjectExpense() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: ProjectExpenseInput) => {
+      const { data, error } = await supabase
+        .from("project_expenses")
+        .insert({
+          project_id: input.project_id,
+          supplier_id: input.supplier_id ?? null,
+          supplier_name: input.supplier_name ?? null,
+          description: input.description ?? null,
+          amount: input.amount,
+          invoice_date: input.invoice_date ?? new Date().toISOString().split("T")[0],
+          due_date: input.due_date ?? null,
+          status: input.status ?? "unpaid",
+          invoice_number: input.invoice_number ?? null,
+          notes: input.notes ?? null,
+          created_by: "manual",
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return data as ProjectExpense;
+    },
+    onSuccess: (data) => invalidateExpenses(qc, data.project_id),
+  });
+}
+
+export function useUpdateProjectExpense() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...input }: Partial<ProjectExpenseInput> & { id: string }) => {
+      const { data, error } = await supabase
+        .from("project_expenses")
+        .update(input)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as ProjectExpense;
+    },
+    onSuccess: (data) => invalidateExpenses(qc, data.project_id),
+  });
+}
+
+export function useDeleteProjectExpense() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, project_id }: { id: string; project_id: string }) => {
+      const { error } = await supabase.from("project_expenses").delete().eq("id", id);
+      if (error) throw error;
+      return { id, project_id };
+    },
+    onSuccess: (data) => invalidateExpenses(qc, data.project_id),
+  });
+}
+
+export function useMarkExpensePaid() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, project_id, paid }: { id: string; project_id: string; paid: boolean }) => {
+      const { error } = await supabase
+        .from("project_expenses")
+        .update({ status: paid ? "paid" : "unpaid" })
+        .eq("id", id);
+      if (error) throw error;
+      return { id, project_id };
+    },
+    onSuccess: (data) => invalidateExpenses(qc, data.project_id),
   });
 }
 

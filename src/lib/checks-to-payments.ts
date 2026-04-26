@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase";
 import { isAutoReceiptsEnabled, issueReceiptForPayment } from "@/lib/receipts";
 import { notifyAction } from "@/lib/notifications";
+import { saveCheckImageToDrive, isDriveBackupEnabled } from "@/lib/api/google-drive";
 
 export interface RecordCheckInput {
   tenant_id: string;
@@ -13,6 +14,8 @@ export interface RecordCheckInput {
   due_date: string; // yyyy-MM-dd
   for_month: string; // MM/yyyy
   source?: "manual" | "whatsapp_agent";
+  /** Source URL of the check image — backed up to Drive when provided. */
+  image_url?: string | null;
 }
 
 export interface RecordCheckResult {
@@ -150,6 +153,37 @@ export async function recordCheckAsPayment(
     }
   } else {
     receipt_skipped = true;
+  }
+
+  // ── 5b. Best-effort Drive backup of the check image ──
+  if (input.image_url && (await isDriveBackupEnabled("drive_backup_checks_enabled"))) {
+    try {
+      const { data: tenantRow } = await supabase
+        .from("tenants")
+        .select("full_name")
+        .eq("id", input.tenant_id)
+        .single();
+      if (tenantRow) {
+        const stamp = new Date().toISOString().split("T")[0];
+        const ext = input.image_url.toLowerCase().split("?")[0].endsWith(".pdf") ? "pdf" : "jpg";
+        const fileName = `check_${input.check_number}_${input.for_month.replace("/", "-")}_${stamp}.${ext}`;
+        const driveUrl = await saveCheckImageToDrive({
+          tenantName: tenantRow.full_name,
+          imageUrl: input.image_url,
+          fileName,
+        });
+        await supabase.from("action_logs").insert({
+          entity_type: "check",
+          entity_id: check.id,
+          action: "drive_backup",
+          description: `גיבוי צ'ק ל-Drive — ${driveUrl}`,
+          source: "system",
+          performed_by: "system",
+        });
+      }
+    } catch (err) {
+      console.error("[checks] drive backup failed:", err);
+    }
   }
 
   // Notification — single per check event

@@ -36,6 +36,7 @@ const EMPTY: PropertyInput = {
   address: "",
   city: "",
   property_type: "residential",
+  suggested_rent: null,
 };
 
 export function PropertyFormModal({ isOpen, onClose, property, defaultComplexId }: Props) {
@@ -57,6 +58,7 @@ export function PropertyFormModal({ isOpen, onClose, property, defaultComplexId 
         address: property.address ?? "",
         city: property.city ?? "",
         property_type: property.property_type,
+        suggested_rent: property.suggested_rent,
       });
     } else {
       // Auto-pick legal entity from default complex if provided
@@ -162,12 +164,27 @@ export function PropertyFormModal({ isOpen, onClose, property, defaultComplexId 
             onChange={(e) => setForm({ ...form, city: e.target.value })}
           />
         </div>
-        <Select
-          label="סוג נכס"
-          value={form.property_type ?? "residential"}
-          onChange={(e) => setForm({ ...form, property_type: e.target.value as PropertyInput["property_type"] })}
-          options={PROPERTY_TYPE_OPTIONS}
-        />
+        <div className="grid grid-cols-2 gap-3">
+          <Select
+            label="סוג נכס"
+            value={form.property_type ?? "residential"}
+            onChange={(e) => setForm({ ...form, property_type: e.target.value as PropertyInput["property_type"] })}
+            options={PROPERTY_TYPE_OPTIONS}
+          />
+          <Input
+            label="מחיר שכירות מוצע (₪)"
+            type="number"
+            min={0}
+            value={form.suggested_rent ?? ""}
+            placeholder="לא הוגדר"
+            onChange={(e) =>
+              setForm({
+                ...form,
+                suggested_rent: e.target.value ? Number(e.target.value) : null,
+              })
+            }
+          />
+        </div>
         {error && <p className="text-sm text-danger">{error}</p>}
         <div className="flex justify-end gap-3 pt-2">
           <Button type="button" variant="outline" onClick={onClose}>

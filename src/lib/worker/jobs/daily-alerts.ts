@@ -2,9 +2,20 @@ import { supabase } from "@/lib/supabase";
 import {
   createNotifications,
   notifyAdminUrgent,
+  sendNotification,
   type NotificationInput,
 } from "@/lib/notifications";
 import { getReliabilityAlertThreshold } from "@/lib/reliability";
+
+async function getPreDueDays(): Promise<number> {
+  const { data } = await supabase
+    .from("settings")
+    .select("value")
+    .eq("key", "payment_reminder_days_before")
+    .single();
+  const n = Number(data?.value);
+  return Number.isFinite(n) && n > 0 ? n : 3;
+}
 
 export const DAILY_ALERTS_JOB = "daily-alerts";
 
@@ -108,6 +119,60 @@ export async function handleDailyAlerts() {
         title: `תשלום חסר — ${tenantName}`,
         message: `${tenantName} לא שילם ₪${row.expected_amount} עבור ${currentMonth}.`,
       });
+    }
+  }
+
+  // ── 3a. Pre-due payment reminders to tenants ──
+  // Sends a WhatsApp reminder X days before due_date to every tenant
+  // with a still-pending schedule row. Deduped per (tenant, month).
+  const preDueDays = await getPreDueDays();
+  const targetDateStr = addDays(today, preDueDays);
+  const { data: preDueRows } = await supabase
+    .from("payment_schedule")
+    .select(
+      "id, tenant_id, expected_amount, month_year, due_date, tenant:tenants(full_name, phone, whatsapp, email)"
+    )
+    .eq("status", "pending")
+    .eq("due_date", targetDateStr);
+
+  for (const row of preDueRows || []) {
+    const tenant = row.tenant as unknown as {
+      full_name: string;
+      phone: string;
+      whatsapp: string | null;
+      email: string | null;
+    } | null;
+    if (!tenant?.phone) continue;
+
+    // Idempotency — don't double-send for same (tenant, month).
+    const { count: alreadySent } = await supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("type", "payment_reminder_predue")
+      .eq("entity_id", row.tenant_id)
+      .gte("created_at", new Date(today.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString());
+    if ((alreadySent || 0) > 0) continue;
+
+    const phoneForWati = (tenant.whatsapp || tenant.phone).replace(/^0/, "972");
+    const msg =
+      `שלום ${tenant.full_name}, תזכורת ידידותית: ` +
+      `התשלום עבור ${row.month_year} (₪${Number(row.expected_amount).toLocaleString()}) ` +
+      `מועד פירעון ${row.due_date}. ` +
+      `תודה — קבוצת חקיקת.`;
+    try {
+      await sendNotification({
+        type: "payment_reminder_predue",
+        entity_type: "tenant",
+        entity_id: row.tenant_id,
+        title: `📨 תזכורת תשלום — ${tenant.full_name} (${row.month_year})`,
+        message: msg,
+        recipient: phoneForWati,
+        channel: "whatsapp",
+        email: tenant.email,
+        sms: tenant.phone,
+      });
+    } catch (err) {
+      console.error(`[daily-alerts] pre-due reminder for ${row.tenant_id} failed:`, err);
     }
   }
 

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Users, CreditCard, FileCheck,
   FileText, BarChart3, FolderKanban, Settings, X,
-  Building2, Bell, MessageCircle,
+  Building2, Bell, MessageCircle, Truck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +18,7 @@ const navItems = [
   { href: "/contracts", label: "חוזים", icon: FileText },
   { href: "/reports", label: "דוחות", icon: BarChart3 },
   { href: "/projects", label: "פרויקטים", icon: FolderKanban },
+  { href: "/suppliers", label: "ספקים", icon: Truck },
   { href: "/alerts", label: "התראות", icon: Bell },
   { href: "/ai-chat", label: "סוכן AI", icon: MessageCircle },
   { href: "/settings", label: "הגדרות", icon: Settings },
