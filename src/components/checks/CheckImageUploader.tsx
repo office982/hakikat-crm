@@ -3,13 +3,12 @@
 import { useState, useRef, useCallback } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
 import { useTenants } from "@/hooks/useTenants";
 import { useContracts } from "@/hooks/useContracts";
-import { useCreateCheck } from "@/hooks/useChecks";
-import { Upload, X, Camera, CheckCircle2, AlertCircle } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Upload, X, Camera, CheckCircle2, AlertCircle, Receipt } from "lucide-react";
 
 interface ScannedCheck {
   check_number: string | null;
@@ -39,7 +38,12 @@ export function CheckImageUploader({ isOpen, onClose }: CheckImageUploaderProps)
 
   const { data: tenants = [] } = useTenants({ status: "active" });
   const { data: contracts = [] } = useContracts({ status: "active" });
-  const createCheck = useCreateCheck();
+  const queryClient = useQueryClient();
+  const [saveResults, setSaveResults] = useState<{
+    receipts: number;
+    skipped: number;
+    failed: number;
+  } | null>(null);
 
   // Filter contracts for selected tenant
   const tenantContracts = selectedTenant
@@ -159,24 +163,35 @@ export function CheckImageUploader({ isOpen, onClose }: CheckImageUploaderProps)
     setError(null);
 
     try {
-      for (const check of scannedChecks) {
-        // Derive for_month from due_date
-        const dueDate = check.due_date!;
-        const forMonth = dueDate.substring(0, 7).replace("-", "/").split("/").reverse().join("/");
-
-        await createCheck.mutateAsync({
+      const res = await fetch("/api/checks/scan-and-record", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           tenant_id: selectedTenant,
           contract_id: selectedContract,
-          check_number: check.check_number!,
-          bank_name: check.bank_name || undefined,
-          branch_number: check.branch_number || undefined,
-          account_number: check.account_number || undefined,
-          amount: check.amount!,
-          due_date: dueDate,
-          for_month: forMonth,
-        });
-      }
+          checks: scannedChecks,
+          source: "manual",
+        }),
+      });
 
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "שגיאה בשמירת הצ'קים");
+
+      const receipts = (json.results || []).filter(
+        (r: { receipt_doc_number: number | null }) => r.receipt_doc_number != null
+      ).length;
+      const skipped = (json.results || []).filter(
+        (r: { receipt_skipped: boolean; receipt_doc_number: number | null }) =>
+          r.receipt_skipped && r.receipt_doc_number == null
+      ).length;
+      const failed = (json.errors || []).length;
+
+      setSaveResults({ receipts, skipped, failed });
+      // Invalidate everything that may have changed
+      queryClient.invalidateQueries({ queryKey: ["checks"] });
+      queryClient.invalidateQueries({ queryKey: ["payments"] });
+      queryClient.invalidateQueries({ queryKey: ["payment_schedule"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       setSuccess(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "שגיאה בשמירת הצ'קים");
@@ -192,6 +207,7 @@ export function CheckImageUploader({ isOpen, onClose }: CheckImageUploaderProps)
     setScannedChecks([]);
     setError(null);
     setSuccess(false);
+    setSaveResults(null);
     setSelectedTenant("");
     setSelectedContract("");
     onClose();
@@ -212,6 +228,22 @@ export function CheckImageUploader({ isOpen, onClose }: CheckImageUploaderProps)
             <CheckCircle2 className="w-16 h-16 text-success mx-auto" />
             <p className="text-lg font-semibold">הצ'קים נשמרו בהצלחה!</p>
             <p className="text-muted">{scannedChecks.length} צ'קים נוספו למערכת</p>
+            {saveResults && (
+              <div className="bg-gray-50 rounded-lg p-4 text-sm space-y-2 max-w-md mx-auto text-right">
+                {saveResults.receipts > 0 && (
+                  <div className="flex items-center gap-2 text-success">
+                    <Receipt className="w-4 h-4" />
+                    <span>{saveResults.receipts} קבלות הופקו אוטומטית</span>
+                  </div>
+                )}
+                {saveResults.skipped > 0 && (
+                  <div className="text-muted">{saveResults.skipped} ללא קבלה (ישות פרטית או כיבוי אוטומטי)</div>
+                )}
+                {saveResults.failed > 0 && (
+                  <div className="text-danger">{saveResults.failed} שגיאות — ראה את היומן</div>
+                )}
+              </div>
+            )}
             <Button onClick={handleClose}>סגור</Button>
           </div>
         ) : (

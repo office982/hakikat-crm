@@ -40,7 +40,11 @@ export interface ContractFormData {
   ai_instructions: string;
   // Step 4 - Generated contract
   contract_text: string;
-  // Step 5
+  // Step 5 — set after the contract is persisted in DB
+  contract_id?: string;
+  tenant_id?: string;
+  easydo_document_id?: string;
+  contract_pdf_url?: string;
   signing_status: "pending" | "sent" | "signed";
 }
 

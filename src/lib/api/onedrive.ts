@@ -248,3 +248,36 @@ export async function saveContractToOneDrive(
   const folder = await createTenantFolder(tenantName);
   return uploadToFolder(folder.id, fileName, contractBlob);
 }
+
+/**
+ * Create a public share link for an existing OneDrive item.
+ * EasyDo (and most signature services) need a publicly fetchable URL,
+ * not a personal "open in OneDrive" URL — so we explicitly create an
+ * anonymous "view" link.
+ */
+export async function createPublicLink(itemId: string): Promise<string> {
+  const data = await graphPost(`/me/drive/items/${itemId}/createLink`, {
+    type: "view",
+    scope: "anonymous",
+  });
+  return data?.link?.webUrl as string;
+}
+
+/**
+ * Upload + immediately create a public share link.
+ * Returns { itemId, url } where url is the anonymous view URL.
+ */
+export async function uploadAndShare(
+  folderId: string,
+  fileName: string,
+  content: Blob
+): Promise<{ itemId: string; url: string }> {
+  const data = await graphPut(
+    `/me/drive/items/${folderId}:/${encodeURIComponent(fileName)}:/content`,
+    content,
+    content.type || "application/octet-stream"
+  );
+  const itemId = data.id as string;
+  const url = await createPublicLink(itemId);
+  return { itemId, url };
+}

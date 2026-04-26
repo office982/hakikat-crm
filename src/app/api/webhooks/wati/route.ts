@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callAIAgent } from "@/lib/api/claude";
 import { sendWhatsAppMessage } from "@/lib/api/wati";
-import { executeAction, issueReceipt } from "@/lib/whatsapp/execute-action";
+import { executeAction, issueReceipt, handleWhatsAppCheckImage } from "@/lib/whatsapp/execute-action";
 import { resolveTenant } from "@/lib/whatsapp/resolve-tenant";
 import { supabase } from "@/lib/supabase";
 
@@ -11,6 +11,10 @@ interface WatiWebhookPayload {
   type: string;
   timestamp: string;
   senderName?: string;
+  // Set when type = "image" / "document"
+  data?: string;       // remote media URL
+  caption?: string;    // optional caption text under the image
+  mime_type?: string;
 }
 
 // Hebrew confirmation words
@@ -38,12 +42,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid token" }, { status: 401 });
     }
 
-    // Only process text messages
+    const phone = payload.waId;
+
+    // ── Image / document → check scanning flow ──
+    if ((payload.type === "image" || payload.type === "document") && payload.data) {
+      try {
+        const result = await handleWhatsAppCheckImage({
+          phone,
+          imageUrl: payload.data,
+          caption: payload.caption || payload.text || "",
+          senderName: payload.senderName,
+        });
+        await sendWhatsAppMessage(phone, result.message);
+      } catch (err) {
+        console.error("image handling failed:", err);
+        await sendWhatsAppMessage(phone, "⚠️ לא הצלחתי לעבד את התמונה — נסה שוב או שלח שוב עם שם הדייר בכיתוב.");
+      }
+      return NextResponse.json({ received: true, action: "image_handled" });
+    }
+
+    // Only process text messages from here on
     if (payload.type !== "text" || !payload.text) {
       return NextResponse.json({ received: true });
     }
 
-    const phone = payload.waId;
     const text = payload.text.trim();
 
     console.log(`WhatsApp from ${phone}: ${text}`);
