@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin as supabase } from "@/lib/supabase";
 import { generatePaymentSchedule } from "@/lib/payment-calculator";
 import { resolveTenant, resolveProject } from "./resolve-tenant";
 import { sendWhatsAppMessage } from "@/lib/api/wati";
