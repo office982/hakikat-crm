@@ -39,6 +39,7 @@ export function Step5Sign({ data, onChange }: Props) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            tenant_id: data.tenant_id || undefined,
             tenant_full_name: data.full_name,
             tenant_id_number: data.id_number,
             tenant_phone: data.phone,
