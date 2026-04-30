@@ -220,7 +220,7 @@ export async function saveCheckImageToDrive(params: {
 }
 
 /**
- * Save a receipt PDF (downloaded from iCount/Morning) to Drive
+ * Save a receipt PDF (downloaded from Accountbook) to Drive
  * under tenant-folder / "Receipts".
  */
 export async function saveReceiptToDrive(params: {

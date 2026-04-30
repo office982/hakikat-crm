@@ -1,5 +1,5 @@
 import { supabaseAdmin as supabase } from "@/lib/supabase";
-import { createMorningDocument } from "@/lib/api/morning";
+import { createAccountbookDocument } from "@/lib/api/accountbook";
 import { saveReceiptToDrive, isDriveBackupEnabled } from "@/lib/api/google-drive";
 
 const SKIPPED_ENTITIES = ["חקיקת פרטי", "חקיקת עסקי/פרטי"];
@@ -70,7 +70,7 @@ export async function issueReceiptForPayment(paymentId: string): Promise<IssueRe
   }
 
   try {
-    const doc = await createMorningDocument({
+    const doc = await createAccountbookDocument({
       client_name: tenant.full_name,
       client_id: tenant.id_number || undefined,
       client_email: tenant.email || undefined,

@@ -36,7 +36,7 @@ export interface RecordCheckResult {
  * 3. Mark schedule paid/partial via record_payment_manual_tx.
  * 4. Back-link the payment to the check (checks.payment_id).
  * 5. If auto-receipts is enabled and the contract's legal entity issues
- *    receipts, create one via Morning.com.
+ *    receipts, create one via Accountbook.
  *
  * Idempotent: if a check with the same check_number + tenant_id already
  * exists, skip and return the existing record.

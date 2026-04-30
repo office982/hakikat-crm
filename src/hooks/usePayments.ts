@@ -168,7 +168,7 @@ export function useCreatePayment() {
 
       if (error) throw error;
 
-      // 2. Optional: auto-issue receipt via server-side route (handles Morning + skip rules).
+      // 2. Optional: auto-issue receipt via server-side route (handles Accountbook + skip rules).
       if (auto_issue_receipt && paymentId) {
         try {
           await fetch(`/api/payments/${paymentId}/issue-receipt`, { method: "POST" });

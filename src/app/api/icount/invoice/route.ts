@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createMorningDocument } from "@/lib/api/morning";
+import { createAccountbookDocument } from "@/lib/api/accountbook";
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "שדות חובה חסרים" }, { status: 400 });
     }
 
-    const result = await createMorningDocument({
+    const result = await createAccountbookDocument({
       client_name,
       client_id: client_id || undefined,
       client_email: email || undefined,
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
       doc_id: result.id,
     });
   } catch (error) {
-    console.error("Morning invoice error:", error);
+    console.error("Accountbook invoice error:", error);
     return NextResponse.json({ error: "שגיאה בהנפקת חשבונית" }, { status: 500 });
   }
 }
