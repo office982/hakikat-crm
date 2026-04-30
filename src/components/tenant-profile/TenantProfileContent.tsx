@@ -18,7 +18,7 @@ import { useTenant } from "@/hooks/useTenants";
 import { usePaymentSchedule, usePayments } from "@/hooks/usePayments";
 import { useChecks } from "@/hooks/useChecks";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import type { MockTenantDetail, MockPaymentRow, MockCheck, MockActionLog } from "@/lib/mock-data";
+import type { TenantDetail, PaymentScheduleRow, CheckRow, ActionLogRow } from "@/types/tenant-profile";
 
 const tabs = [
   { id: "personal", label: "פרטים אישיים" },
@@ -67,7 +67,7 @@ export function TenantProfileContent({ tenantId }: { tenantId: string }) {
   const { data: actionLogs } = useActionLogs(tenantId, contractIds);
 
   // Build the adapted tenant detail for sub-components
-  const tenantDetail: MockTenantDetail | null = useMemo(() => {
+  const tenantDetail: TenantDetail | null = useMemo(() => {
     if (!tenant) return null;
 
     const contract = activeContract;

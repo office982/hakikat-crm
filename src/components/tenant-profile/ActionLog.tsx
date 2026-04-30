@@ -22,7 +22,7 @@ const filterOptions = [
   { id: "update", label: "עדכונים" },
 ];
 
-export function ActionLog({ logs }: { logs: MockActionLog[] }) {
+export function ActionLog({ logs }: { logs: ActionLogRow[] }) {
   const [filter, setFilter] = useState("all");
 
   const filtered = filter === "all" ? logs : logs.filter((l) => l.type === filter);
