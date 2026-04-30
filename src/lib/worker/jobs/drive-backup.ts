@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin as supabase } from "@/lib/supabase";
 import { ensureFolder, uploadToDriveFolder } from "@/lib/api/google-drive";
 
 export const DRIVE_BACKUP_JOB = "drive-backup";

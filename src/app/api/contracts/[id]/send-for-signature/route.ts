@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin as supabase } from "@/lib/supabase";
 import { sendForSignature } from "@/lib/api/easydo";
 import { uploadToDriveFolder, ensureFolder, makeFilePublic } from "@/lib/api/google-drive";
 import { renderContractHtml } from "@/lib/contract-render";

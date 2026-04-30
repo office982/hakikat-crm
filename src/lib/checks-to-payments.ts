@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin as supabase } from "@/lib/supabase";
 import { isAutoReceiptsEnabled, issueReceiptForPayment } from "@/lib/receipts";
 import { notifyAction } from "@/lib/notifications";
 import { saveCheckImageToDrive, isDriveBackupEnabled } from "@/lib/api/google-drive";

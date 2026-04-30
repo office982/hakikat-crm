@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { EasydoWebhookEvent } from "@/lib/api/easydo";
 import { verifyEasydoWebhook } from "@/lib/api/easydo";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin as supabase } from "@/lib/supabase";
 import { saveContractToDrive } from "@/lib/api/google-drive";
 import { sendNotification } from "@/lib/notifications";
 

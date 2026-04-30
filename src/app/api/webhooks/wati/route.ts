@@ -3,7 +3,7 @@ import { callAIAgent } from "@/lib/api/claude";
 import { sendWhatsAppMessage } from "@/lib/api/wati";
 import { executeAction, issueReceipt, handleWhatsAppCheckImage } from "@/lib/whatsapp/execute-action";
 import { resolveTenant } from "@/lib/whatsapp/resolve-tenant";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin as supabase } from "@/lib/supabase";
 
 interface WatiWebhookPayload {
   waId: string;

@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin as supabase } from "@/lib/supabase";
 import { createMorningDocument } from "@/lib/api/morning";
 import { saveReceiptToDrive, isDriveBackupEnabled } from "@/lib/api/google-drive";
 

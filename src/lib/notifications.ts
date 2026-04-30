@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin as supabase } from "@/lib/supabase";
 import { sendWhatsAppMessage } from "@/lib/api/wati";
 import { sendEmail } from "@/lib/api/email";
 import { sendSms } from "@/lib/api/sms";
