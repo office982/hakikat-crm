@@ -130,3 +130,27 @@ export function useUpdateTenant() {
     },
   });
 }
+
+export function useDeleteTenant() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { count } = await supabase
+        .from("contracts")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", id)
+        .in("status", ["active", "pending_signature"]);
+      if ((count || 0) > 0) {
+        throw new Error(`לא ניתן למחוק — יש ${count} חוזים פעילים לדייר זה.`);
+      }
+      const { error } = await supabase.from("tenants").delete().eq("id", id);
+      if (error) throw error;
+      return id;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tenants"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
