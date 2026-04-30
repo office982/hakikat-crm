@@ -5,22 +5,26 @@ import { Tabs } from "@/components/ui/Tabs";
 import { Card } from "@/components/ui/Card";
 import { KPICard } from "@/components/dashboard/KPICard";
 import { Button } from "@/components/ui/Button";
-import { Badge, PaymentStatusBadge, CheckStatusBadge } from "@/components/ui/Badge";
+import { PaymentStatusBadge, CheckStatusBadge } from "@/components/ui/Badge";
 import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageSpinner } from "@/components/ui/Spinner";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PaymentForm } from "@/components/payments/PaymentForm";
+import { PaymentEditModal } from "@/components/payments/PaymentEditModal";
 import { formatCurrency, formatDate, formatMonthYear } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import { CreditCard, AlertTriangle, FileCheck, Plus, Send } from "lucide-react";
-import { useMonthlySchedule, useOverdueSchedule } from "@/hooks/usePayments";
+import { CreditCard, AlertTriangle, FileCheck, Plus, Send, Pencil, Trash2 } from "lucide-react";
+import { useMonthlySchedule, useOverdueSchedule, usePayments, useDeletePayment } from "@/hooks/usePayments";
 import { useChecks } from "@/hooks/useChecks";
+import type { Payment } from "@/types/database";
 import Link from "next/link";
 
 const tabs = [
   { id: "monthly", label: "חודשי" },
   { id: "debts", label: "חובות פתוחים" },
   { id: "checks", label: "לוח צ׳קים" },
+  { id: "payments", label: "תשלומים שנרשמו" },
 ];
 
 function buildMonthOptions(): { value: string; label: string }[] {
@@ -55,6 +59,23 @@ export function PaymentsContent() {
   const { data: scheduleRows, isLoading: scheduleLoading } = useMonthlySchedule(month);
   const { data: overdueRows, isLoading: overdueLoading } = useOverdueSchedule();
   const { data: checks, isLoading: checksLoading } = useChecks();
+  const { data: payments, isLoading: paymentsLoading } = usePayments();
+  const deletePaymentMut = useDeletePayment();
+
+  const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+  const [deletePaymentTarget, setDeletePaymentTarget] = useState<Payment | null>(null);
+  const [deletePaymentError, setDeletePaymentError] = useState<string | null>(null);
+
+  const confirmDeletePayment = async () => {
+    if (!deletePaymentTarget) return;
+    setDeletePaymentError(null);
+    try {
+      await deletePaymentMut.mutateAsync(deletePaymentTarget.id);
+      setDeletePaymentTarget(null);
+    } catch (err) {
+      setDeletePaymentError(err instanceof Error ? err.message : "מחיקה נכשלה.");
+    }
+  };
 
   const monthOptions = useMemo(() => buildMonthOptions(), []);
 
@@ -256,6 +277,75 @@ export function PaymentsContent() {
         </Card>
       )}
 
+      {activeTab === "payments" && (
+        <Card noPadding>
+          <div className="p-4 border-b border-border">
+            <h3 className="font-semibold">תשלומים שנרשמו</h3>
+          </div>
+          {paymentsLoading ? (
+            <div className="p-8"><PageSpinner /></div>
+          ) : !payments || payments.length === 0 ? (
+            <div className="p-8">
+              <EmptyState icon={CreditCard} title="לא נרשמו תשלומים" description="עדיין לא נרשמו תשלומים במערכת" />
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-gray-50">
+                    <th className="text-right px-4 py-3 font-medium text-muted">דייר</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted">עבור חודש</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted">סכום</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted">תאריך</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted">אמצעי</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted hidden md:table-cell">צ'ק</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted">פעולות</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payments.map((p) => (
+                    <tr key={p.id} className="border-b border-border hover:bg-gray-50">
+                      <td className="px-4 py-3 font-medium">
+                        <Link href={`/tenants/${p.tenant_id}`} className="text-primary hover:underline">
+                          {p.tenant?.full_name || "—"}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3">{formatMonthYear(p.month_paid_for)}</td>
+                      <td className="px-4 py-3" dir="ltr">{formatCurrency(p.amount)}</td>
+                      <td className="px-4 py-3">{formatDate(p.payment_date)}</td>
+                      <td className="px-4 py-3 text-muted">
+                        {p.payment_method === "check" ? "צ׳ק" : p.payment_method === "transfer" ? "העברה" : "מזומן"}
+                      </td>
+                      <td className="px-4 py-3 text-muted hidden md:table-cell" dir="ltr">
+                        {p.check_number ? `${p.check_number}${p.check_bank ? ` · ${p.check_bank}` : ""}` : "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => setEditingPayment(p)}
+                            className="p-1 rounded hover:bg-gray-100 text-muted"
+                            aria-label="ערוך תשלום"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setDeletePaymentTarget(p)}
+                            className="p-1 rounded hover:bg-red-50 text-danger"
+                            aria-label="מחק תשלום"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
+
       {/* Payment form modal */}
       <PaymentForm
         isOpen={showPaymentForm}
@@ -269,6 +359,31 @@ export function PaymentsContent() {
         scheduleId={selectedRow?.scheduleId}
         defaultMonth={selectedRow?.monthYear || month}
         defaultAmount={selectedRow?.amount}
+      />
+
+      <PaymentEditModal
+        isOpen={!!editingPayment}
+        onClose={() => setEditingPayment(null)}
+        payment={editingPayment}
+      />
+
+      <ConfirmDialog
+        isOpen={!!deletePaymentTarget}
+        onClose={() => {
+          setDeletePaymentTarget(null);
+          setDeletePaymentError(null);
+        }}
+        onConfirm={confirmDeletePayment}
+        title="מחיקת תשלום"
+        message={
+          deletePaymentTarget
+            ? deletePaymentError ||
+              `למחוק את התשלום עבור ${formatMonthYear(deletePaymentTarget.month_paid_for)} בסך ${formatCurrency(deletePaymentTarget.amount)}? הפעולה אינה הפיכה.`
+            : ""
+        }
+        variant="danger"
+        confirmText="מחק"
+        isLoading={deletePaymentMut.isPending}
       />
     </div>
   );

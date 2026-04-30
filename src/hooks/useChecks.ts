@@ -88,6 +88,60 @@ export function useUpdateCheckStatus() {
   });
 }
 
+export function useUpdateCheck() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...updates
+    }: {
+      id: string;
+      check_number?: string;
+      bank_name?: string | null;
+      branch_number?: string | null;
+      account_number?: string | null;
+      amount?: number;
+      due_date?: string;
+      for_month?: string;
+      notes?: string | null;
+      status?: "pending" | "deposited" | "bounced" | "cancelled";
+    }) => {
+      const { data, error } = await supabase
+        .from("checks")
+        .update(updates)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as Check;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["checks"] });
+    },
+  });
+}
+
+export function useDeleteCheck() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { count } = await supabase
+        .from("payments")
+        .select("id", { count: "exact", head: true })
+        .or(`check_number.eq.${id}`);
+      if ((count || 0) > 0) {
+        throw new Error("לא ניתן למחוק — קיימים תשלומים מקושרים לצ'ק זה.");
+      }
+      const { error } = await supabase.from("checks").delete().eq("id", id);
+      if (error) throw error;
+      return id;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["checks"] });
+    },
+  });
+}
+
 /**
  * Mark a check as bounced via the atomic bounce_check_tx RPC.
  * Reverts the payment schedule row to overdue, decrements the
