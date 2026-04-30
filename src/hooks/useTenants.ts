@@ -21,7 +21,7 @@ export function useTenants(filters?: {
             property:properties(
               *,
               complex:complexes(*),
-              legal_entity:legal_entities(*)
+              legal_entity:legal_entities!properties_legal_entity_id_fkey(*)
             )
           ),
           contracts(*)
@@ -62,7 +62,7 @@ export function useTenant(id: string) {
             property:properties(
               *,
               complex:complexes(*),
-              legal_entity:legal_entities(*)
+              legal_entity:legal_entities!properties_legal_entity_id_fkey(*)
             )
           ),
           contracts(

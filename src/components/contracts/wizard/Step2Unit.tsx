@@ -1,6 +1,7 @@
 "use client";
 
 import { Select } from "@/components/ui/Select";
+import { useLegalEntities, useComplexes, useProperties, useUnits } from "@/hooks/useProperties";
 import type { ContractFormData } from "../ContractWizard";
 
 interface Props {
@@ -8,73 +9,16 @@ interface Props {
   onChange: (partial: Partial<ContractFormData>) => void;
 }
 
-// Entities matching the DB
-const entities = [
-  { value: "e1", label: "חקיקת נכסים" },
-  { value: "e1b", label: "חקיקת פרטי" },
-  { value: "e2", label: 'שיא הכרמל מדור בע"מ' },
-  { value: "e3", label: 'נכסי המושבה בע"מ' },
-];
-
-const complexesByEntity: Record<string, { value: string; label: string }[]> = {
-  e1: [
-    { value: "c1", label: "מתחם החקלאי" },
-    { value: "c2", label: "רמז" },
-    { value: "c3", label: "תבורי" },
-  ],
-  e1b: [
-    { value: "c1", label: "מתחם החקלאי" },
-    { value: "c2", label: "רמז" },
-    { value: "c3", label: "תבורי" },
-  ],
-  e2: [{ value: "c4", label: "הרצל 48 גן טיול" }],
-  e3: [{ value: "c5", label: "הדקלים 123 פרדס חנה" }],
-};
-
-const propertiesByComplex: Record<string, { value: string; label: string }[]> = {
-  c1: [
-    { value: "p1", label: "כלבייה 1" },
-    { value: "p2", label: "כלבייה 2" },
-    { value: "p3", label: "אורוות האמנים" },
-    { value: "p10", label: "חקלאי כללי" },
-  ],
-  c2: [
-    { value: "p4", label: "הזמיר 27" },
-    { value: "p5", label: "האשכולית" },
-  ],
-  c3: [
-    { value: "p6", label: "דירה עמית" },
-    { value: "p7", label: "דירה עידו" },
-  ],
-  c4: [{ value: "p8", label: "הרצל 48" }],
-  c5: [{ value: "p9", label: "הדקלים 123" }],
-};
-
-const unitsByProperty: Record<string, { value: string; label: string }[]> = {
-  p1: Array.from({ length: 14 }, (_, i) => ({ value: `u${i + 1}`, label: `חנות ${i + 1}` })),
-  p2: Array.from({ length: 16 }, (_, i) => ({ value: `u${i + 15}`, label: `חנות ${i + 15}` })),
-  p3: [{ value: "u31", label: "אורוות האמנים" }],
-  p4: [
-    { value: "u32", label: "דירה קטנה" },
-    { value: "u33", label: "דירה גדולה" },
-  ],
-  p5: [{ value: "u34", label: "האשכולית" }],
-  p6: [{ value: "u35", label: "דירה עמית" }],
-  p7: [{ value: "u36", label: "דירה עידו" }],
-  p8: [
-    { value: "u37", label: "דירה 1" },
-    { value: "u38", label: "דירה 3" },
-    { value: "u39", label: "דירה 5" },
-    { value: "u40", label: "דירה 7" },
-  ],
-  p9: [{ value: "u41", label: "הדקלים 123" }],
-  p10: [{ value: "u42", label: "חקלאי כללי" }],
-};
-
 export function Step2Unit({ data, onChange }: Props) {
-  const complexes = data.legal_entity_id ? complexesByEntity[data.legal_entity_id] || [] : [];
-  const properties = data.complex_id ? propertiesByComplex[data.complex_id] || [] : [];
-  const units = data.property_id ? unitsByProperty[data.property_id] || [] : [];
+  const { data: entities = [], isLoading: loadingEntities } = useLegalEntities();
+  const { data: complexes = [], isLoading: loadingComplexes } = useComplexes(data.legal_entity_id || undefined);
+  const { data: properties = [], isLoading: loadingProperties } = useProperties(data.complex_id || undefined);
+  const { data: units = [], isLoading: loadingUnits } = useUnits(data.property_id || undefined);
+
+  const entityOptions = entities.map((e) => ({ value: e.id, label: e.name }));
+  const complexOptions = complexes.map((c) => ({ value: c.id, label: c.name }));
+  const propertyOptions = properties.map((p) => ({ value: p.id, label: p.name }));
+  const unitOptions = units.map((u) => ({ value: u.id, label: u.unit_identifier }));
 
   return (
     <div className="space-y-4">
@@ -84,14 +28,15 @@ export function Step2Unit({ data, onChange }: Props) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Select
           label="ישות משפטית *"
-          options={entities}
+          options={entityOptions}
           value={data.legal_entity_id}
-          placeholder="בחר ישות..."
+          placeholder={loadingEntities ? "טוען..." : "בחר ישות..."}
+          disabled={loadingEntities}
           onChange={(e) => {
-            const opt = entities.find((o) => o.value === e.target.value);
+            const opt = entities.find((o) => o.id === e.target.value);
             onChange({
               legal_entity_id: e.target.value,
-              entity_name: opt?.label || "",
+              entity_name: opt?.name || "",
               complex_id: "",
               complex_name: "",
               property_id: "",
@@ -103,15 +48,15 @@ export function Step2Unit({ data, onChange }: Props) {
         />
         <Select
           label="מתחם *"
-          options={complexes}
+          options={complexOptions}
           value={data.complex_id}
-          placeholder="בחר מתחם..."
-          disabled={!data.legal_entity_id}
+          placeholder={loadingComplexes ? "טוען..." : "בחר מתחם..."}
+          disabled={!data.legal_entity_id || loadingComplexes}
           onChange={(e) => {
-            const opt = complexes.find((o) => o.value === e.target.value);
+            const opt = complexes.find((o) => o.id === e.target.value);
             onChange({
               complex_id: e.target.value,
-              complex_name: opt?.label || "",
+              complex_name: opt?.name || "",
               property_id: "",
               property_name: "",
               unit_id: "",
@@ -121,15 +66,15 @@ export function Step2Unit({ data, onChange }: Props) {
         />
         <Select
           label="נכס *"
-          options={properties}
+          options={propertyOptions}
           value={data.property_id}
-          placeholder="בחר נכס..."
-          disabled={!data.complex_id}
+          placeholder={loadingProperties ? "טוען..." : "בחר נכס..."}
+          disabled={!data.complex_id || loadingProperties}
           onChange={(e) => {
-            const opt = properties.find((o) => o.value === e.target.value);
+            const opt = properties.find((o) => o.id === e.target.value);
             onChange({
               property_id: e.target.value,
-              property_name: opt?.label || "",
+              property_name: opt?.name || "",
               unit_id: "",
               unit_name: "",
             });
@@ -137,15 +82,15 @@ export function Step2Unit({ data, onChange }: Props) {
         />
         <Select
           label="יחידה *"
-          options={units}
+          options={unitOptions}
           value={data.unit_id}
-          placeholder="בחר יחידה..."
-          disabled={!data.property_id}
+          placeholder={loadingUnits ? "טוען..." : "בחר יחידה..."}
+          disabled={!data.property_id || loadingUnits}
           onChange={(e) => {
-            const opt = units.find((o) => o.value === e.target.value);
+            const opt = units.find((o) => o.id === e.target.value);
             onChange({
               unit_id: e.target.value,
-              unit_name: opt?.label || "",
+              unit_name: opt?.unit_identifier || "",
             });
           }}
         />
