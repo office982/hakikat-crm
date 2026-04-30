@@ -21,7 +21,7 @@ export function DashboardContent() {
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
   const { data: dbActivity = [] } = useRecentActivity();
   const { data: dbNotifications = [] } = useNotifications(true);
-  const { data: revenueData = [] } = useRevenueData();
+  const { data: revenueData } = useRevenueData();
 
   const kpis = stats || EMPTY_KPIS;
   const collectionPercent = kpis.monthlyCollection.expected > 0
