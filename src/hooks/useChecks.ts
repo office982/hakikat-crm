@@ -125,12 +125,17 @@ export function useDeleteCheck() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { count } = await supabase
-        .from("payments")
-        .select("id", { count: "exact", head: true })
-        .or(`check_number.eq.${id}`);
-      if ((count || 0) > 0) {
-        throw new Error("לא ניתן למחוק — קיימים תשלומים מקושרים לצ'ק זה.");
+      const { data: check, error: fetchErr } = await supabase
+        .from("checks")
+        .select("payment_id, status")
+        .eq("id", id)
+        .single();
+      if (fetchErr) throw fetchErr;
+      if (check.payment_id) {
+        throw new Error("לא ניתן למחוק — קיים תשלום מקושר לצ'ק זה.");
+      }
+      if (check.status === "deposited") {
+        throw new Error("לא ניתן למחוק צ'ק שהופקד.");
       }
       const { error } = await supabase.from("checks").delete().eq("id", id);
       if (error) throw error;
