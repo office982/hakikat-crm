@@ -187,6 +187,92 @@ export function useCreatePayment() {
   });
 }
 
+export function useUpdatePayment() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...updates
+    }: {
+      id: string;
+      amount?: number;
+      payment_date?: string;
+      month_paid_for?: string;
+      payment_method?: "check" | "transfer" | "cash";
+      check_number?: string | null;
+      check_bank?: string | null;
+      check_date?: string | null;
+      notes?: string | null;
+    }) => {
+      const { data, error } = await supabase
+        .from("payments")
+        .update(updates)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as Payment;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["payments"] });
+      queryClient.invalidateQueries({ queryKey: ["payment_schedule"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+export function useDeletePayment() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data: payment, error: fetchErr } = await supabase
+        .from("payments")
+        .select("schedule_id, contract_id, tenant_id, month_paid_for")
+        .eq("id", id)
+        .single();
+      if (fetchErr) throw fetchErr;
+
+      const { error } = await supabase.from("payments").delete().eq("id", id);
+      if (error) throw error;
+
+      // Recompute schedule row status for the affected month
+      if (payment.schedule_id) {
+        const { data: remaining } = await supabase
+          .from("payments")
+          .select("amount")
+          .eq("schedule_id", payment.schedule_id);
+        const { data: schedule } = await supabase
+          .from("payment_schedule")
+          .select("expected_amount, due_date")
+          .eq("id", payment.schedule_id)
+          .single();
+
+        const totalPaid = (remaining || []).reduce((s, p) => s + (p.amount || 0), 0);
+        const expected = schedule?.expected_amount || 0;
+        let status: "paid" | "partial" | "pending" | "overdue" = "pending";
+        if (totalPaid >= expected) status = "paid";
+        else if (totalPaid > 0) status = "partial";
+        else {
+          const dueDate = schedule?.due_date ? new Date(schedule.due_date) : null;
+          status = dueDate && dueDate < new Date() ? "overdue" : "pending";
+        }
+        await supabase
+          .from("payment_schedule")
+          .update({ status })
+          .eq("id", payment.schedule_id);
+      }
+      return id;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["payments"] });
+      queryClient.invalidateQueries({ queryKey: ["payment_schedule"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
 export function useIssueReceipt() {
   const queryClient = useQueryClient();
   return useMutation({
