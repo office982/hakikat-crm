@@ -28,7 +28,7 @@ export async function issueReceiptForPayment(paymentId: string): Promise<IssueRe
     .select(`
       id, tenant_id, contract_id, amount, month_paid_for,
       icount_receipt_id, receipt_doc_number,
-      tenant:tenants(full_name, id_number, email),
+      tenant:tenants(full_name, id_number, email, accountbook_client_number),
       contract:contracts(legal_entity_id, legal_entity:legal_entities(id, name))
     `)
     .eq("id", paymentId)
@@ -49,6 +49,7 @@ export async function issueReceiptForPayment(paymentId: string): Promise<IssueRe
     full_name: string;
     id_number: string | null;
     email: string | null;
+    accountbook_client_number: number | null;
   } | null;
   const contract = payment.contract as unknown as {
     legal_entity_id: string;
@@ -74,6 +75,7 @@ export async function issueReceiptForPayment(paymentId: string): Promise<IssueRe
       client_name: tenant.full_name,
       client_id: tenant.id_number || undefined,
       client_email: tenant.email || undefined,
+      client_number: tenant.accountbook_client_number ?? undefined,
       amount: Number(payment.amount),
       description: `שכר דירה — ${payment.month_paid_for}`,
       type: "receipt",

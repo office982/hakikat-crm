@@ -58,6 +58,7 @@ export interface Tenant {
   notes: string | null;
   reliability_score: number;
   reliability_computed_at: string | null;
+  accountbook_client_number: number | null;
   created_at: string;
   updated_at: string;
   unit?: Unit;
