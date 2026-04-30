@@ -6,7 +6,7 @@ import {
   buildTenantMonthlySummary,
   formatTenantMonthlySummaryHe,
 } from "@/lib/reports";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin as supabase } from "@/lib/supabase";
 import { sendNotification } from "@/lib/notifications";
 
 export const WEEKLY_REPORT_JOB = "whatsapp-weekly-report";
