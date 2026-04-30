@@ -37,7 +37,7 @@ export function CheckImageUploader({ isOpen, onClose }: CheckImageUploaderProps)
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
   const { data: tenants = [] } = useTenants({ status: "active" });
-  const { data: contracts = [] } = useContracts({ status: "active" });
+  const { data: contracts = [] } = useContracts();
   const queryClient = useQueryClient();
   const [saveResults, setSaveResults] = useState<{
     receipts: number;
@@ -45,9 +45,9 @@ export function CheckImageUploader({ isOpen, onClose }: CheckImageUploaderProps)
     failed: number;
   } | null>(null);
 
-  // Filter contracts for selected tenant
+  // Filter contracts for selected tenant (exclude cancelled only)
   const tenantContracts = selectedTenant
-    ? contracts.filter((c) => c.tenant_id === selectedTenant && c.status === "active")
+    ? contracts.filter((c) => c.tenant_id === selectedTenant && c.status !== "cancelled")
     : [];
 
   const tenantOptions = tenants.map((t) => ({
