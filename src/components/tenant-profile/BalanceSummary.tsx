@@ -7,9 +7,9 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend,
 } from "recharts";
-import type { MockPaymentRow } from "@/lib/mock-data";
+import type { PaymentScheduleRow } from "@/types/tenant-profile";
 
-export function BalanceSummary({ schedule }: { schedule: MockPaymentRow[] }) {
+export function BalanceSummary({ schedule }: { schedule: PaymentScheduleRow[] }) {
   const totalCharged = schedule.reduce((sum, r) => sum + r.expected_amount, 0);
   const totalPaid = schedule.reduce((sum, r) => sum + r.paid_amount, 0);
   const openBalance = totalCharged - totalPaid;

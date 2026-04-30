@@ -5,10 +5,10 @@ import { CheckStatusBadge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { formatCurrency, formatDate, formatMonthYear } from "@/lib/utils";
 import { Plus } from "lucide-react";
-import type { MockCheck } from "@/lib/mock-data";
+import type { CheckRow } from "@/types/tenant-profile";
 
 interface ChecksManagerProps {
-  checks: MockCheck[];
+  checks: CheckRow[];
   totalRequired: number;
 }
 
