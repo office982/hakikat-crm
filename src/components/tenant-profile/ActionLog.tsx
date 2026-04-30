@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { CreditCard, FileText, MessageCircle, RefreshCw, Plus } from "lucide-react";
 import { relativeTime } from "@/lib/utils";
-import type { MockActionLog } from "@/lib/mock-data";
+import type { ActionLogRow } from "@/types/tenant-profile";
 
 const typeConfig = {
   payment: { icon: CreditCard, color: "text-green-500 bg-green-50" },
