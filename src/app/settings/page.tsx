@@ -7,6 +7,9 @@ import { Button } from "@/components/ui/Button";
 import { Tabs } from "@/components/ui/Tabs";
 import { Badge } from "@/components/ui/Badge";
 import { Save, TestTube, Building2, Link2, FileText, Bell, Briefcase } from "lucide-react";
+import { useLegalEntities } from "@/hooks/useProperties";
+import { LegalEntityFormModal } from "@/components/properties/LegalEntityFormModal";
+import type { LegalEntity } from "@/types/database";
 
 const tabs = [
   { id: "properties", label: "נכסים ויחידות" },
@@ -33,6 +36,10 @@ export default function SettingsPage() {
 }
 
 function PropertiesSection() {
+  const { data: entities = [], isLoading } = useLegalEntities();
+  const [editing, setEditing] = useState<LegalEntity | null>(null);
+  const [creating, setCreating] = useState(false);
+
   return (
     <Card>
       <div className="flex items-center gap-2 mb-4">
@@ -41,14 +48,31 @@ function PropertiesSection() {
       </div>
       <p className="text-sm text-muted mb-4">ניהול ישויות משפטיות, מתחמים, נכסים ויחידות.</p>
       <div className="space-y-3">
-        {["חקיקת נכסים", 'שיא הכרמל מדור בע"מ', 'נכסי המושבה בע"מ'].map((entity) => (
-          <div key={entity} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-            <span className="font-medium">{entity}</span>
-            <Button variant="ghost" size="sm">ערוך</Button>
+        {isLoading && <p className="text-sm text-muted">טוען...</p>}
+        {!isLoading && entities.length === 0 && (
+          <p className="text-sm text-muted">אין ישויות משפטיות עדיין.</p>
+        )}
+        {entities.map((entity) => (
+          <div key={entity.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <span className="font-medium">{entity.name}</span>
+            <Button variant="ghost" size="sm" onClick={() => setEditing(entity)}>
+              ערוך
+            </Button>
           </div>
         ))}
-        <Button variant="outline" size="sm">+ הוסף ישות משפטית</Button>
+        <Button variant="outline" size="sm" onClick={() => setCreating(true)}>
+          + הוסף ישות משפטית
+        </Button>
       </div>
+
+      <LegalEntityFormModal
+        isOpen={!!editing || creating}
+        onClose={() => {
+          setEditing(null);
+          setCreating(false);
+        }}
+        entity={editing}
+      />
     </Card>
   );
 }
@@ -89,32 +113,15 @@ function IntegrationsSection() {
 }
 
 function TemplatesSection() {
-  const templates = [
-    { name: "תבנית חוזה בסיסית", type: "DOCX/PDF", description: "תבנית ברירת מחדל לחוזה שכירות" },
-    { name: "תזכורת תשלום", type: "WhatsApp", description: "הודעת תזכורת תשלום לדייר" },
-    { name: "הודעה לדייר חדש", type: "WhatsApp", description: "הודעת ברוכים הבאים" },
-    { name: "חידוש חוזה", type: "WhatsApp", description: "הודעת חידוש חוזה" },
-  ];
-
   return (
     <Card>
       <div className="flex items-center gap-2 mb-4">
         <FileText className="w-5 h-5 text-primary" />
         <h3 className="text-lg font-semibold">תבניות</h3>
       </div>
-      <div className="space-y-3">
-        {templates.map((t) => (
-          <div key={t.name} className="flex items-center justify-between p-4 border border-border rounded-lg">
-            <div>
-              <p className="font-medium">{t.name}</p>
-              <p className="text-xs text-muted">{t.description}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge>{t.type}</Badge>
-              <Button variant="ghost" size="sm">ערוך</Button>
-            </div>
-          </div>
-        ))}
+      <div className="text-center py-8 text-muted">
+        <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
+        <p className="text-sm">ניהול תבניות עדיין לא זמין.</p>
       </div>
     </Card>
   );

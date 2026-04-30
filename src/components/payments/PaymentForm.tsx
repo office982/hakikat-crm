@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { useCreatePayment } from "@/hooks/usePayments";
+import { useContracts } from "@/hooks/useContracts";
 
 interface PaymentFormProps {
   isOpen: boolean;
@@ -30,16 +31,43 @@ export function PaymentForm({
   const [checkBank, setCheckBank] = useState("");
   const [checkDate, setCheckDate] = useState("");
   const [notes, setNotes] = useState("");
+  const [selectedContractId, setSelectedContractId] = useState("");
+
+  const needsTenantPicker = !tenantId || !contractId;
+  const { data: contracts, isLoading: contractsLoading } = useContracts(
+    needsTenantPicker ? { status: "active" } : undefined
+  );
+
+  const contractOptions = useMemo(() => {
+    if (!contracts) return [];
+    return contracts.map((c) => {
+      const unit = c.unit?.unit_identifier || "";
+      const property = c.unit?.property?.name || "";
+      const suffix = [unit, property].filter(Boolean).join(" · ");
+      return {
+        value: c.id,
+        label: `${c.tenant?.full_name || "—"}${suffix ? ` (${suffix})` : ""}`,
+      };
+    });
+  }, [contracts]);
+
+  const selectedContract = useMemo(
+    () => contracts?.find((c) => c.id === selectedContractId),
+    [contracts, selectedContractId]
+  );
 
   const createPayment = useCreatePayment();
+
+  const resolvedTenantId = tenantId || selectedContract?.tenant_id;
+  const resolvedContractId = contractId || selectedContractId;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (tenantId && contractId) {
+    if (resolvedTenantId && resolvedContractId) {
       await createPayment.mutateAsync({
-        tenant_id: tenantId,
-        contract_id: contractId,
+        tenant_id: resolvedTenantId,
+        contract_id: resolvedContractId,
         schedule_id: scheduleId,
         amount,
         payment_date: paymentDate,
@@ -60,12 +88,24 @@ export function PaymentForm({
     setAmount(defaultAmount || 0);
     setNotes("");
     setCheckNumber("");
+    setSelectedContractId("");
   };
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="רישום תשלום" size="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
-        <Input label="דייר" value={tenantName} readOnly className="bg-gray-50" />
+        {needsTenantPicker ? (
+          <Select
+            label="דייר"
+            value={selectedContractId}
+            onChange={(e) => setSelectedContractId(e.target.value)}
+            options={contractOptions}
+            placeholder={contractsLoading ? "טוען..." : "בחר דייר"}
+            required
+          />
+        ) : (
+          <Input label="דייר" value={tenantName} readOnly className="bg-gray-50" />
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Input
