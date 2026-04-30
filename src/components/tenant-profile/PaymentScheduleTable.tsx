@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/Button";
 import { formatCurrency, formatMonthYear, formatDate } from "@/lib/utils";
 import { Plus, Receipt } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { MockPaymentRow } from "@/lib/mock-data";
+import type { PaymentScheduleRow } from "@/types/tenant-profile";
 
 interface PaymentScheduleTableProps {
-  schedule: MockPaymentRow[];
+  schedule: PaymentScheduleRow[];
   onRecordPayment: (monthYear: string) => void;
 }
 

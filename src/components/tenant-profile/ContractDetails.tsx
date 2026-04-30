@@ -5,9 +5,9 @@ import { Button } from "@/components/ui/Button";
 import { formatCurrency, formatDate, daysUntil } from "@/lib/utils";
 import { ExternalLink, Edit } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { MockTenantDetail } from "@/lib/mock-data";
+import type { TenantDetail } from "@/types/tenant-profile";
 
-export function ContractDetails({ tenant }: { tenant: MockTenantDetail }) {
+export function ContractDetails({ tenant }: { tenant: TenantDetail }) {
   const c = tenant.contract;
   const days = daysUntil(c.end_date);
   const year2Rent = Math.round(c.monthly_rent * (1 + c.annual_increase_percent / 100));

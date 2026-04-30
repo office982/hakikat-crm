@@ -9,8 +9,6 @@ import { Bell, CheckCircle, AlertTriangle, FileText, CreditCard, Clock } from "l
 import { relativeTime } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { useNotifications, useMarkAsRead } from "@/hooks/useNotifications";
-import { mockAlerts } from "@/lib/mock-data";
-import { isSupabaseConfigured } from "@/lib/supabase";
 
 const typeIcons: Record<string, typeof AlertTriangle> = {
   missing_payment: CreditCard,
@@ -25,25 +23,14 @@ export function AlertsContent() {
   const { data: dbNotifications = [] } = useNotifications();
   const markAsRead = useMarkAsRead();
 
-  const useDb = isSupabaseConfigured() && dbNotifications.length > 0;
-
-  const alerts = useDb
-    ? dbNotifications.map((n) => ({
-        id: n.id,
-        title: n.title,
-        message: n.message || "",
-        type: n.type,
-        is_read: n.is_read,
-        timestamp: n.created_at,
-      }))
-    : mockAlerts.map((a) => ({
-        id: a.id,
-        title: a.title,
-        message: a.description,
-        type: a.type,
-        is_read: false,
-        timestamp: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
-      }));
+  const alerts = dbNotifications.map((n) => ({
+    id: n.id,
+    title: n.title,
+    message: n.message || "",
+    type: n.type,
+    is_read: n.is_read,
+    timestamp: n.created_at,
+  }));
 
   const filtered = showRead ? alerts : alerts.filter((a) => !a.is_read);
   const unreadCount = alerts.filter((a) => !a.is_read).length;
@@ -101,7 +88,7 @@ export function AlertsContent() {
                     <p className="text-sm text-muted">{alert.message}</p>
                     <p className="text-xs text-muted mt-1">{relativeTime(alert.timestamp)}</p>
                   </div>
-                  {!alert.is_read && useDb && (
+                  {!alert.is_read && (
                     <Button
                       variant="ghost"
                       size="sm"

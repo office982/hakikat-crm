@@ -3,9 +3,9 @@
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { User, Phone, Mail, MapPin, Hash } from "lucide-react";
-import type { MockTenantDetail } from "@/lib/mock-data";
+import type { TenantDetail } from "@/types/tenant-profile";
 
-export function PersonalInfo({ tenant }: { tenant: MockTenantDetail }) {
+export function PersonalInfo({ tenant }: { tenant: TenantDetail }) {
   return (
     <Card>
       <h3 className="text-lg font-semibold mb-4">פרטים אישיים</h3>

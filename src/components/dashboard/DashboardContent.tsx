@@ -5,20 +5,25 @@ import { KPICard } from "./KPICard";
 import { RevenueChart } from "./RevenueChart";
 import { AlertsList } from "./AlertsList";
 import { ActivityFeed } from "./ActivityFeed";
-import { mockKPIs, mockRevenueData, mockAlerts, mockActivities } from "@/lib/mock-data";
 import { formatCurrency } from "@/lib/utils";
 import { useDashboardStats, useRecentActivity, useRevenueData } from "@/hooks/useDashboard";
 import { useNotifications } from "@/hooks/useNotifications";
 import { PageSpinner } from "@/components/ui/Spinner";
 
+const EMPTY_KPIS = {
+  monthlyCollection: { collected: 0, expected: 0 },
+  totalDebt: { amount: 0, tenantsCount: 0 },
+  expiringContracts: 0,
+  occupancy: { occupied: 0, total: 0 },
+};
+
 export function DashboardContent() {
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
-  const { data: dbActivity } = useRecentActivity();
-  const { data: dbNotifications } = useNotifications(true);
-  const { data: revenueData } = useRevenueData();
+  const { data: dbActivity = [] } = useRecentActivity();
+  const { data: dbNotifications = [] } = useNotifications(true);
+  const { data: revenueData = [] } = useRevenueData();
 
-  // Use real data if available, fallback to mock
-  const kpis = stats || mockKPIs;
+  const kpis = stats || EMPTY_KPIS;
   const collectionPercent = kpis.monthlyCollection.expected > 0
     ? Math.round((kpis.monthlyCollection.collected / kpis.monthlyCollection.expected) * 100)
     : 0;
@@ -26,26 +31,28 @@ export function DashboardContent() {
     ? Math.round((kpis.occupancy.occupied / kpis.occupancy.total) * 100)
     : 0;
 
-  // Map DB activity to feed format, fallback to mock
-  const activities = dbActivity && dbActivity.length > 0
-    ? dbActivity.map((log) => ({
-        id: log.id,
-        type: (log.entity_type === "payment" ? "payment" : log.entity_type === "contract" ? "contract" : "update") as "payment" | "contract" | "message" | "update",
-        description: log.description || log.action,
-        timestamp: log.created_at,
-      }))
-    : mockActivities;
+  const activities = dbActivity.map((log) => ({
+    id: log.id,
+    type: (log.entity_type === "payment"
+      ? "payment"
+      : log.entity_type === "contract"
+        ? "contract"
+        : "update") as "payment" | "contract" | "message" | "update",
+    description: log.description || log.action,
+    timestamp: log.created_at,
+  }));
 
-  // Map DB notifications to alerts format, fallback to mock
-  const alerts = dbNotifications && dbNotifications.length > 0
-    ? dbNotifications.map((n) => ({
-        id: n.id,
-        priority: (n.type.includes("missing_payment") ? "critical" : n.type.includes("contract_expiry") ? "high" : "medium") as "critical" | "high" | "medium" | "low",
-        title: n.title,
-        description: n.message || "",
-        type: n.type,
-      }))
-    : mockAlerts;
+  const alerts = dbNotifications.map((n) => ({
+    id: n.id,
+    priority: (n.type.includes("missing_payment")
+      ? "critical"
+      : n.type.includes("contract_expiry")
+        ? "high"
+        : "medium") as "critical" | "high" | "medium" | "low",
+    title: n.title,
+    description: n.message || "",
+    type: n.type,
+  }));
 
   if (statsLoading) return <PageSpinner />;
 
@@ -86,7 +93,7 @@ export function DashboardContent() {
       </div>
 
       {/* Revenue Chart */}
-      <RevenueChart data={revenueData || mockRevenueData} />
+      <RevenueChart data={revenueData} />
 
       {/* Alerts + Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

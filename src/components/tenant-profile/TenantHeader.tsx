@@ -5,10 +5,10 @@ import { Button } from "@/components/ui/Button";
 import { CreditCard, MessageCircle, FileText, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { daysUntil } from "@/lib/utils";
-import type { MockTenantDetail } from "@/lib/mock-data";
+import type { TenantDetail } from "@/types/tenant-profile";
 
 interface TenantHeaderProps {
-  tenant: MockTenantDetail;
+  tenant: TenantDetail;
   onRecordPayment: () => void;
 }
 
