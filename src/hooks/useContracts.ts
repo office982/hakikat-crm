@@ -106,3 +106,87 @@ export function useCreateContract() {
     },
   });
 }
+
+export function useUpdateContract() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...updates
+    }: {
+      id: string;
+      start_date?: string;
+      end_date?: string;
+      monthly_rent?: number;
+      annual_increase_percent?: number;
+      building_fee?: number;
+      arnona?: number;
+      payment_method?: "checks" | "transfer" | "cash";
+      total_checks?: number;
+      status?: "active" | "pending_signature" | "expired" | "cancelled";
+      google_drive_url?: string | null;
+      notes?: string | null;
+    }) => {
+      const { data, error } = await supabase
+        .from("contracts")
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["contracts"] });
+      queryClient.invalidateQueries({ queryKey: ["tenants"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+export function useDeleteContract() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const [{ count: paymentsCount }, { count: checksCount }, contractRow] = await Promise.all([
+        supabase.from("payments").select("id", { count: "exact", head: true }).eq("contract_id", id),
+        supabase.from("checks").select("id", { count: "exact", head: true }).eq("contract_id", id),
+        supabase.from("contracts").select("unit_id").eq("id", id).single(),
+      ]);
+      if ((paymentsCount || 0) > 0) {
+        throw new Error(`לא ניתן למחוק — יש ${paymentsCount} תשלומים תחת חוזה זה.`);
+      }
+      if ((checksCount || 0) > 0) {
+        throw new Error(`לא ניתן למחוק — יש ${checksCount} צ'קים תחת חוזה זה.`);
+      }
+      // Remove payment_schedule rows first (no payments rely on them)
+      const { error: schedErr } = await supabase
+        .from("payment_schedule")
+        .delete()
+        .eq("contract_id", id);
+      if (schedErr) throw schedErr;
+
+      const { error } = await supabase.from("contracts").delete().eq("id", id);
+      if (error) throw error;
+
+      // Free up the unit
+      if (contractRow.data?.unit_id) {
+        await supabase
+          .from("units")
+          .update({ is_occupied: false })
+          .eq("id", contractRow.data.unit_id);
+      }
+      return id;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["contracts"] });
+      queryClient.invalidateQueries({ queryKey: ["tenants"] });
+      queryClient.invalidateQueries({ queryKey: ["units"] });
+      queryClient.invalidateQueries({ queryKey: ["payment_schedule"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}

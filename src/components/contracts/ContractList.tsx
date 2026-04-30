@@ -3,16 +3,19 @@
 import { useState, useMemo } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { Badge, ContractStatusBadge } from "@/components/ui/Badge";
+import { ContractStatusBadge } from "@/components/ui/Badge";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageSpinner } from "@/components/ui/Spinner";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { formatCurrency, formatDate, daysUntil } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import { Plus, FileText } from "lucide-react";
+import { Plus, FileText, Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useContracts } from "@/hooks/useContracts";
+import { useContracts, useDeleteContract } from "@/hooks/useContracts";
+import type { Contract } from "@/types/database";
+import { ContractEditModal } from "./ContractEditModal";
 
 const statusOptions = [
   { value: "", label: "כל הסטטוסים" },
@@ -24,12 +27,27 @@ const statusOptions = [
 export function ContractList() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [editing, setEditing] = useState<Contract | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Contract | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Fetch active/expired from hook; "expiring" is client-side filtering
   const hookStatus = statusFilter === "expiring" ? "active" : statusFilter || undefined;
   const { data: contracts, isLoading } = useContracts({
     status: hookStatus,
   });
+  const deleteMut = useDeleteContract();
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteError(null);
+    try {
+      await deleteMut.mutateAsync(deleteTarget.id);
+      setDeleteTarget(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "מחיקה נכשלה.");
+    }
+  };
 
   const filtered = useMemo(() => {
     if (!contracts) return [];
@@ -93,6 +111,7 @@ export function ContractList() {
                       <th className="text-right px-4 py-3 font-medium text-muted hidden md:table-cell">ימים לסיום</th>
                       <th className="text-right px-4 py-3 font-medium text-muted">שכ&quot;ד</th>
                       <th className="text-right px-4 py-3 font-medium text-muted">סטטוס</th>
+                      <th className="text-right px-4 py-3 font-medium text-muted">פעולות</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -122,6 +141,24 @@ export function ContractList() {
                           <td className="px-4 py-3">
                             <ContractStatusBadge status={c.status} />
                           </td>
+                          <td className="px-4 py-3">
+                            <div className="flex gap-1">
+                              <button
+                                onClick={() => setEditing(c)}
+                                className="p-1 rounded hover:bg-gray-100 text-muted"
+                                aria-label="ערוך חוזה"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => setDeleteTarget(c)}
+                                className="p-1 rounded hover:bg-red-50 text-danger"
+                                aria-label="מחק חוזה"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       );
                     })}
@@ -132,6 +169,30 @@ export function ContractList() {
           )}
         </>
       )}
+
+      <ContractEditModal
+        isOpen={!!editing}
+        onClose={() => setEditing(null)}
+        contract={editing}
+      />
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        onClose={() => {
+          setDeleteTarget(null);
+          setDeleteError(null);
+        }}
+        onConfirm={confirmDelete}
+        title="מחיקת חוזה"
+        message={
+          deleteTarget
+            ? deleteError ||
+              `למחוק את החוזה של ${deleteTarget.tenant?.full_name || "הדייר"}? לוח התשלומים יימחק ויחידה תשוחרר. הפעולה אינה הפיכה.`
+            : ""
+        }
+        variant="danger"
+        confirmText="מחק"
+        isLoading={deleteMut.isPending}
+      />
     </div>
   );
 }
