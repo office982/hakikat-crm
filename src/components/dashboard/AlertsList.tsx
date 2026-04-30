@@ -2,7 +2,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import Link from "next/link";
 import { AlertTriangle, Clock, FileText, CreditCard } from "lucide-react";
-import type { MockAlert, AlertPriority } from "@/lib/mock-data";
+import type { AlertItem, AlertPriority } from "@/types/tenant-profile";
 
 const priorityConfig: Record<AlertPriority, { color: string; badgeVariant: "danger" | "warning" | "info" | "default"; icon: typeof AlertTriangle }> = {
   critical: { color: "border-r-red-500", badgeVariant: "danger", icon: AlertTriangle },
@@ -11,7 +11,7 @@ const priorityConfig: Record<AlertPriority, { color: string; badgeVariant: "dang
   low: { color: "border-r-blue-500", badgeVariant: "info", icon: CreditCard },
 };
 
-export function AlertsList({ alerts }: { alerts: MockAlert[] }) {
+export function AlertsList({ alerts }: { alerts: AlertItem[] }) {
   return (
     <Card>
       <div className="flex items-center justify-between mb-4">

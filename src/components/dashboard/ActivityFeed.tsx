@@ -1,7 +1,7 @@
 import { Card } from "@/components/ui/Card";
 import { CreditCard, FileText, MessageCircle, RefreshCw } from "lucide-react";
 import { relativeTime } from "@/lib/utils";
-import type { MockActivity } from "@/lib/mock-data";
+import type { ActivityItem } from "@/types/tenant-profile";
 
 const typeConfig = {
   payment: { icon: CreditCard, color: "text-green-500 bg-green-50" },
@@ -10,7 +10,7 @@ const typeConfig = {
   update: { icon: RefreshCw, color: "text-amber-500 bg-amber-50" },
 };
 
-export function ActivityFeed({ activities }: { activities: MockActivity[] }) {
+export function ActivityFeed({ activities }: { activities: ActivityItem[] }) {
   return (
     <Card>
       <h3 className="text-lg font-semibold mb-4">פעילות אחרונה</h3>

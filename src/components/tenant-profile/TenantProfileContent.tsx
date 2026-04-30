@@ -75,7 +75,7 @@ export function TenantProfileContent({ tenantId }: { tenantId: string }) {
     const property = unit?.property;
 
     // Build payment schedule in the shape sub-components expect
-    const paymentSchedule: MockPaymentRow[] = (scheduleRows || []).map((row) => {
+    const paymentSchedule: PaymentScheduleRow[] = (scheduleRows || []).map((row) => {
       // Find matching payment(s) for this schedule row
       const matchingPayments = (payments || []).filter(
         (p) => p.month_paid_for === row.month_year
@@ -98,7 +98,7 @@ export function TenantProfileContent({ tenantId }: { tenantId: string }) {
     });
 
     // Build checks in the shape sub-components expect
-    const checksData: MockCheck[] = (checks || []).map((c) => ({
+    const checksData: CheckRow[] = (checks || []).map((c) => ({
       id: c.id,
       check_number: c.check_number,
       bank_name: c.bank_name || "",
@@ -109,7 +109,7 @@ export function TenantProfileContent({ tenantId }: { tenantId: string }) {
     }));
 
     // Build action logs
-    const logs: MockActionLog[] = (actionLogs || []).map((log) => ({
+    const logs: ActionLogRow[] = (actionLogs || []).map((log) => ({
       id: log.id,
       action: log.action,
       description: log.description || log.action,
@@ -120,7 +120,7 @@ export function TenantProfileContent({ tenantId }: { tenantId: string }) {
         log.entity_type === "contract" ? "contract" :
         log.action?.includes("whatsapp") || log.action?.includes("message") ? "message" :
         "update"
-      ) as MockActionLog["type"],
+      ) as ActionLogRow["type"],
     }));
 
     return {
