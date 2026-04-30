@@ -93,7 +93,7 @@ export function DashboardContent() {
       </div>
 
       {/* Revenue Chart */}
-      <RevenueChart data={revenueData} />
+      <RevenueChart data={revenueData ?? []} />
 
       {/* Alerts + Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
