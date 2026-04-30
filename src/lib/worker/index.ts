@@ -11,6 +11,7 @@ import {
   handleReliabilityRecompute,
 } from "./jobs/reliability-recompute";
 import { DRIVE_BACKUP_JOB, handleDriveBackup } from "./jobs/drive-backup";
+import { ONEDRIVE_BACKUP_JOB, handleOneDriveBackup } from "./jobs/onedrive-backup";
 import {
   NOTIFICATION_RETRY_JOB,
   handleNotificationRetry,
@@ -57,6 +58,10 @@ export async function startWorker() {
       await handleDriveBackup();
     });
 
+    await boss.work(ONEDRIVE_BACKUP_JOB, { localConcurrency: 1 }, async () => {
+      await handleOneDriveBackup();
+    });
+
     await boss.work(NOTIFICATION_RETRY_JOB, { localConcurrency: 1 }, async () => {
       await handleNotificationRetry();
     });
@@ -87,13 +92,19 @@ export async function startWorker() {
       tz: "Asia/Jerusalem",
     });
 
+    // Sunday 03:30 — OneDrive backup (parallel to Google Drive; gated
+    // by `onedrive_backup_enabled` setting + ONEDRIVE_REFRESH_TOKEN env)
+    await boss.schedule(ONEDRIVE_BACKUP_JOB, "30 3 * * 0", undefined, {
+      tz: "Asia/Jerusalem",
+    });
+
     // Every 30 minutes — retry failed notification deliveries
     await boss.schedule(NOTIFICATION_RETRY_JOB, "*/30 * * * *", undefined, {
       tz: "Asia/Jerusalem",
     });
 
     console.log(
-      "[worker] Jobs registered: daily-alerts, weekly-report, monthly-report, reliability-recompute, drive-backup, notification-retry"
+      "[worker] Jobs registered: daily-alerts, weekly-report, monthly-report, reliability-recompute, drive-backup, onedrive-backup, notification-retry"
     );
   } catch (err) {
     console.error("[worker] Failed to start:", err);
