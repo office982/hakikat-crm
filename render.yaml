@@ -29,6 +29,18 @@ services:
         sync: false
       - key: ICOUNT_PASS
         sync: false
+      - key: ACCOUNTBOOK_USERNAME
+        sync: false
+      - key: ACCOUNTBOOK_PASSWORD
+        sync: false
+      - key: ACCOUNTBOOK_ESEK_NUM
+        sync: false
+      - key: ACCOUNTBOOK_BASE_URL
+        sync: false
+      - key: ACCOUNTBOOK_VAT_RATE
+        sync: false
+      - key: ACCOUNTBOOK_VAT_EXEMPT
+        sync: false
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
