@@ -32,6 +32,13 @@ export function PaymentForm({
   const [checkDate, setCheckDate] = useState("");
   const [notes, setNotes] = useState("");
   const [selectedContractId, setSelectedContractId] = useState("");
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [result, setResult] = useState<{
+    receipt?:
+      | { status: "issued"; docnum?: number; doc_url?: string }
+      | { status: "skipped" }
+      | { status: "failed"; error: string };
+  } | null>(null);
 
   const needsTenantPicker = !tenantId || !contractId;
   const { data: contracts, isLoading: contractsLoading } = useContracts(
@@ -62,11 +69,28 @@ export function PaymentForm({
   const resolvedTenantId = tenantId || selectedContract?.tenant_id;
   const resolvedContractId = contractId || selectedContractId;
 
+  const resetForm = () => {
+    setAmount(defaultAmount || 0);
+    setNotes("");
+    setCheckNumber("");
+    setSelectedContractId("");
+    setSubmitError(null);
+    setResult(null);
+  };
+
+  const handleClose = () => {
+    onClose();
+    resetForm();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
 
-    if (resolvedTenantId && resolvedContractId) {
-      await createPayment.mutateAsync({
+    if (!resolvedTenantId || !resolvedContractId) return;
+
+    try {
+      const res = await createPayment.mutateAsync({
         tenant_id: resolvedTenantId,
         contract_id: resolvedContractId,
         schedule_id: scheduleId,
@@ -79,21 +103,71 @@ export function PaymentForm({
         check_date: method === "check" ? checkDate : undefined,
         notes: notes || undefined,
         created_by: "manual",
+        auto_issue_receipt: issueReceipt,
       });
+      setResult({ receipt: res.receipt });
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "שמירה נכשלה.");
     }
-
-    // TODO: If issueReceipt, call /api/icount/receipt
-
-    onClose();
-    // Reset
-    setAmount(defaultAmount || 0);
-    setNotes("");
-    setCheckNumber("");
-    setSelectedContractId("");
   };
 
+  if (result) {
+    const r = result.receipt;
+    return (
+      <Modal isOpen={isOpen} onClose={handleClose} title="רישום תשלום" size="lg">
+        <div className="space-y-4">
+          <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm">
+            <p className="font-medium text-green-800">התשלום נרשם בהצלחה.</p>
+          </div>
+
+          {issueReceipt && r?.status === "issued" && (
+            <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm">
+              <p className="font-medium text-green-800">
+                הקבלה הונפקה{r.docnum ? ` (מס' ${r.docnum})` : ""}.
+              </p>
+              {r.doc_url && (
+                <a
+                  href={r.doc_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-block text-primary underline"
+                >
+                  פתח קבלה
+                </a>
+              )}
+            </div>
+          )}
+
+          {issueReceipt && r?.status === "skipped" && (
+            <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
+              לא הונפקה קבלה — הישות המשפטית של החוזה אינה מנפיקה מסמכים.
+            </div>
+          )}
+
+          {issueReceipt && r?.status === "failed" && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm">
+              <p className="font-medium text-red-800">הנפקת הקבלה נכשלה.</p>
+              <p className="mt-1 text-red-700" dir="ltr">{r.error}</p>
+              <p className="mt-1 text-red-700">ניתן להנפיק מחדש מתוך רשימת התשלומים.</p>
+            </div>
+          )}
+
+          {issueReceipt && !r && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-muted">
+              סטטוס הקבלה אינו ידוע.
+            </div>
+          )}
+
+          <div className="flex justify-end pt-4 border-t border-border">
+            <Button type="button" onClick={handleClose}>סגור</Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="רישום תשלום" size="lg">
+    <Modal isOpen={isOpen} onClose={handleClose} title="רישום תשלום" size="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
         {needsTenantPicker ? (
           <Select
@@ -166,8 +240,12 @@ export function PaymentForm({
           <span className="text-sm">הנפק קבלה אוטומטית</span>
         </label>
 
+        {submitError && (
+          <p className="text-sm text-danger" dir="ltr">{submitError}</p>
+        )}
+
         <div className="flex gap-3 justify-end pt-4 border-t border-border">
-          <Button variant="secondary" type="button" onClick={onClose}>ביטול</Button>
+          <Button variant="secondary" type="button" onClick={handleClose}>ביטול</Button>
           <Button type="submit" isLoading={createPayment.isPending}>רשום תשלום</Button>
         </div>
       </form>

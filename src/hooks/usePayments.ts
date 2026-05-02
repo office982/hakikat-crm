@@ -169,15 +169,32 @@ export function useCreatePayment() {
       if (error) throw error;
 
       // 2. Optional: auto-issue receipt via server-side route (handles Accountbook + skip rules).
+      let receipt:
+        | { status: "issued"; docnum?: number; doc_url?: string }
+        | { status: "skipped" }
+        | { status: "failed"; error: string }
+        | undefined;
+
       if (auto_issue_receipt && paymentId) {
         try {
-          await fetch(`/api/payments/${paymentId}/issue-receipt`, { method: "POST" });
+          const res = await fetch(`/api/payments/${paymentId}/issue-receipt`, { method: "POST" });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            receipt = { status: "failed", error: body?.error || `HTTP ${res.status}` };
+          } else if (body?.skipped) {
+            receipt = { status: "skipped" };
+          } else {
+            receipt = { status: "issued", docnum: body?.docnum, doc_url: body?.doc_url };
+          }
         } catch (receiptErr) {
-          console.warn("auto-issue receipt failed:", receiptErr);
+          receipt = {
+            status: "failed",
+            error: receiptErr instanceof Error ? receiptErr.message : "network_error",
+          };
         }
       }
 
-      return { id: paymentId };
+      return { id: paymentId, receipt };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["payments"] });
