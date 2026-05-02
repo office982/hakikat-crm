@@ -5,7 +5,7 @@ import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
-import { useCreatePayment } from "@/hooks/usePayments";
+import { useCreatePayment, useIssueReceipt } from "@/hooks/usePayments";
 import { useContracts } from "@/hooks/useContracts";
 
 interface PaymentFormProps {
@@ -34,6 +34,7 @@ export function PaymentForm({
   const [selectedContractId, setSelectedContractId] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [result, setResult] = useState<{
+    paymentId: string;
     receipt?:
       | { status: "issued"; docnum?: number; doc_url?: string }
       | { status: "skipped" }
@@ -65,6 +66,7 @@ export function PaymentForm({
   );
 
   const createPayment = useCreatePayment();
+  const issueReceiptMut = useIssueReceipt();
 
   const resolvedTenantId = tenantId || selectedContract?.tenant_id;
   const resolvedContractId = contractId || selectedContractId;
@@ -105,9 +107,32 @@ export function PaymentForm({
         created_by: "manual",
         auto_issue_receipt: issueReceipt,
       });
-      setResult({ receipt: res.receipt });
+      setResult({ paymentId: res.id, receipt: res.receipt });
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "שמירה נכשלה.");
+    }
+  };
+
+  const handleRetryReceipt = async () => {
+    if (!result?.paymentId) return;
+    try {
+      const r = await issueReceiptMut.mutateAsync(result.paymentId);
+      if (r.skipped) {
+        setResult({ ...result, receipt: { status: "skipped" } });
+      } else {
+        setResult({
+          ...result,
+          receipt: { status: "issued", docnum: r.docnum, doc_url: r.doc_url },
+        });
+      }
+    } catch (err) {
+      setResult({
+        ...result,
+        receipt: {
+          status: "failed",
+          error: err instanceof Error ? err.message : "network_error",
+        },
+      });
     }
   };
 
@@ -148,7 +173,17 @@ export function PaymentForm({
             <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm">
               <p className="font-medium text-red-800">הנפקת הקבלה נכשלה.</p>
               <p className="mt-1 text-red-700" dir="ltr">{r.error}</p>
-              <p className="mt-1 text-red-700">ניתן להנפיק מחדש מתוך רשימת התשלומים.</p>
+              <div className="mt-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRetryReceipt}
+                  isLoading={issueReceiptMut.isPending}
+                >
+                  נסה שוב
+                </Button>
+              </div>
             </div>
           )}
 

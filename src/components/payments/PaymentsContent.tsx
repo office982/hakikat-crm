@@ -14,8 +14,8 @@ import { PaymentForm } from "@/components/payments/PaymentForm";
 import { PaymentEditModal } from "@/components/payments/PaymentEditModal";
 import { formatCurrency, formatDate, formatMonthYear } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import { CreditCard, AlertTriangle, FileCheck, Plus, Send, Pencil, Trash2 } from "lucide-react";
-import { useMonthlySchedule, useOverdueSchedule, usePayments, useDeletePayment } from "@/hooks/usePayments";
+import { CreditCard, AlertTriangle, FileCheck, Plus, Send, Pencil, Trash2, Receipt } from "lucide-react";
+import { useMonthlySchedule, useOverdueSchedule, usePayments, useDeletePayment, useIssueReceipt } from "@/hooks/usePayments";
 import { useChecks } from "@/hooks/useChecks";
 import type { Payment } from "@/types/database";
 import Link from "next/link";
@@ -61,10 +61,43 @@ export function PaymentsContent() {
   const { data: checks, isLoading: checksLoading } = useChecks();
   const { data: payments, isLoading: paymentsLoading } = usePayments();
   const deletePaymentMut = useDeletePayment();
+  const issueReceiptMut = useIssueReceipt();
 
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [deletePaymentTarget, setDeletePaymentTarget] = useState<Payment | null>(null);
   const [deletePaymentError, setDeletePaymentError] = useState<string | null>(null);
+  const [issuingReceiptId, setIssuingReceiptId] = useState<string | null>(null);
+  const [receiptFlash, setReceiptFlash] = useState<{ paymentId: string; kind: "ok" | "skipped" | "error"; message: string } | null>(null);
+
+  const handleIssueReceipt = async (payment: Payment) => {
+    setIssuingReceiptId(payment.id);
+    setReceiptFlash(null);
+    try {
+      const r = await issueReceiptMut.mutateAsync(payment.id);
+      if (r.skipped) {
+        setReceiptFlash({ paymentId: payment.id, kind: "skipped", message: "הקבלה דולגה (ישות פרטית)." });
+      } else {
+        setReceiptFlash({
+          paymentId: payment.id,
+          kind: "ok",
+          message: r.docnum ? `הקבלה הונפקה (מס' ${r.docnum}).` : "הקבלה הונפקה.",
+        });
+      }
+    } catch (err) {
+      setReceiptFlash({
+        paymentId: payment.id,
+        kind: "error",
+        message: err instanceof Error ? err.message : "הנפקה נכשלה.",
+      });
+    } finally {
+      setIssuingReceiptId(null);
+    }
+  };
+
+  const needsReceipt = (p: Payment) =>
+    !p.icount_receipt_id &&
+    !p.receipt_doc_number &&
+    p.receipt_issue_error !== "skipped_private_entity";
 
   const confirmDeletePayment = async () => {
     if (!deletePaymentTarget) return;
@@ -320,21 +353,46 @@ export function PaymentsContent() {
                         {p.check_number ? `${p.check_number}${p.check_bank ? ` · ${p.check_bank}` : ""}` : "—"}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => setEditingPayment(p)}
-                            className="p-1 rounded hover:bg-gray-100 text-muted"
-                            aria-label="ערוך תשלום"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => setDeletePaymentTarget(p)}
-                            className="p-1 rounded hover:bg-red-50 text-danger"
-                            aria-label="מחק תשלום"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex gap-1">
+                            {needsReceipt(p) && (
+                              <button
+                                onClick={() => handleIssueReceipt(p)}
+                                disabled={issuingReceiptId === p.id}
+                                className="p-1 rounded hover:bg-blue-50 text-primary disabled:opacity-50"
+                                aria-label="הנפק קבלה"
+                                title="הנפק קבלה"
+                              >
+                                <Receipt className="w-4 h-4" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setEditingPayment(p)}
+                              className="p-1 rounded hover:bg-gray-100 text-muted"
+                              aria-label="ערוך תשלום"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => setDeletePaymentTarget(p)}
+                              className="p-1 rounded hover:bg-red-50 text-danger"
+                              aria-label="מחק תשלום"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                          {receiptFlash?.paymentId === p.id && (
+                            <span
+                              className={cn(
+                                "text-xs",
+                                receiptFlash.kind === "ok" && "text-green-700",
+                                receiptFlash.kind === "skipped" && "text-yellow-700",
+                                receiptFlash.kind === "error" && "text-danger"
+                              )}
+                            >
+                              {receiptFlash.message}
+                            </span>
+                          )}
                         </div>
                       </td>
                     </tr>
