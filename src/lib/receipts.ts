@@ -2,7 +2,6 @@ import { supabaseAdmin as supabase } from "@/lib/supabase";
 import { createAccountbookDocument } from "@/lib/api/accountbook";
 import { saveReceiptToDrive, isDriveBackupEnabled } from "@/lib/api/google-drive";
 
-const SKIPPED_ENTITIES: any = [];
 
 export interface IssueReceiptResult {
   success: boolean;
@@ -59,16 +58,7 @@ export async function issueReceiptForPayment(paymentId: string): Promise<IssueRe
   if (!tenant) return { success: false, error: "tenant_missing" };
 
   const entityName = contract?.legal_entity?.name || "";
-  if (SKIPPED_ENTITIES.some((e) => entityName.includes(e))) {
-    await supabase
-      .from("payments")
-      .update({
-        receipt_issue_attempted_at: new Date().toISOString(),
-        receipt_issue_error: "skipped_private_entity",
-      })
-      .eq("id", payment.id);
-    return { success: true, skipped: true };
-  }
+ 
 
   try {
     const doc = await createAccountbookDocument({
