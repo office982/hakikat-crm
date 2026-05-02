@@ -2,7 +2,7 @@ import { supabaseAdmin as supabase } from "@/lib/supabase";
 import { createAccountbookDocument } from "@/lib/api/accountbook";
 import { saveReceiptToDrive, isDriveBackupEnabled } from "@/lib/api/google-drive";
 
-const SKIPPED_ENTITIES = ["חקיקת פרטי", "חקיקת עסקי/פרטי"];
+const SKIPPED_ENTITIES: any = [];
 
 export interface IssueReceiptResult {
   success: boolean;
