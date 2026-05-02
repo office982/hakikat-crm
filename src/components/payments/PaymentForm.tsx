@@ -41,6 +41,7 @@ export function PaymentForm({
   const contractOptions = useMemo(() => {
     if (!contracts) return [];
     return contracts.map((c) => {
+      console.log(JSON.stringify(c));
       const unit = c.unit?.unit_identifier || "";
       const property = c.unit?.property?.name || "";
       const suffix = [unit, property].filter(Boolean).join(" · ");
