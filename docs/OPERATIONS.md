@@ -59,7 +59,7 @@
 | Variable | תיאור |
 |----------|-------|
 | `WATI_API_KEY` | מפתח WATI |
-| `WATI_BASE_URL` | URL של WATI tenant (לדוגמה: `https://app-server.wati.io/api/v1`) |
+| `WATI_BASE_URL` | בסיס ה־URL של WATI tenant **בלי** סיומת `/api/v1` (הקוד מוסיף את הנתיב). לדוגמה: `https://app-server.wati.io` או `https://live-mt-server.wati.io/<tenant_id>` |
 | `WATI_WEBHOOK_TOKEN` | טוקן לאימות webhooks נכנסים מ־WATI |
 | `ADMIN_WHATSAPP_PHONE` | מספר WhatsApp של מנהל המערכת לדוחות שבועיים/חודשיים (E.164, לדוגמה `+972501234567`) |
 
