@@ -146,7 +146,9 @@ function typeCodeFor(type: AccountbookDocumentType): number {
     case "receipt":
       return 400;
     case "invoice_receipt":
-      return 320;
+      // 320 (חשבונית מס/קבלה) is Osek Murshe only.
+      // עוסק פטור / amuta cannot issue 320 — fall back to 400 (קבלה).
+      return ACCOUNTBOOK_VAT_EXEMPT ? 400 : 320;
     case "credit_note":
       return 330;
     case "invoice":
