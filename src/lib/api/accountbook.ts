@@ -13,7 +13,7 @@ const ACCOUNTBOOK_BASE_URL =
   process.env.ACCOUNTBOOK_BASE_URL || "https://cloud.tamal.co.il";
 const ACCOUNTBOOK_USERNAME = process.env.ACCOUNTBOOK_USERNAME;
 const ACCOUNTBOOK_PASSWORD = process.env.ACCOUNTBOOK_PASSWORD;
-const ACCOUNTBOOK_ESEK_NUM = Number('064813116');
+const ACCOUNTBOOK_ESEK_NUM = Number('764047');
 const ACCOUNTBOOK_VAT_RATE = Number(process.env.ACCOUNTBOOK_VAT_RATE ?? "18");
 const ACCOUNTBOOK_VAT_EXEMPT = process.env.ACCOUNTBOOK_VAT_EXEMPT === "true";
 
