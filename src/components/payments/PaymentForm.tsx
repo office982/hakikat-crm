@@ -23,6 +23,7 @@ export function PaymentForm({
   isOpen, onClose, tenantName, tenantId, contractId, scheduleId, defaultMonth, defaultAmount,
 }: PaymentFormProps) {
   const [method, setMethod] = useState("check");
+  const [category, setCategory] = useState<"rent" | "arnona" | "utilities" | "other">("rent");
   const [issueReceipt, setIssueReceipt] = useState(true);
   const [amount, setAmount] = useState(defaultAmount || 0);
   const [monthPaid, setMonthPaid] = useState(defaultMonth || "");
@@ -106,6 +107,7 @@ export function PaymentForm({
         notes: notes || undefined,
         created_by: "manual",
         auto_issue_receipt: issueReceipt,
+        payment_category: category,
       });
       setResult({ paymentId: res.id, receipt: res.receipt });
     } catch (err) {
@@ -254,6 +256,20 @@ export function PaymentForm({
             ]}
           />
         </div>
+
+        <Select
+          label="עבור"
+          value={category}
+          onChange={(e) =>
+            setCategory(e.target.value as "rent" | "arnona" | "utilities" | "other")
+          }
+          options={[
+            { value: "rent", label: "שכר דירה" },
+            { value: "arnona", label: "ארנונה" },
+            { value: "utilities", label: "חשבונות (מים/חשמל/גז)" },
+            { value: "other", label: "אחר" },
+          ]}
+        />
 
         {method === "check" && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-lg">

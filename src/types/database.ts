@@ -126,6 +126,7 @@ export interface Payment {
   receipt_issue_error: string | null;
   notes: string | null;
   created_by: "manual" | "whatsapp_agent" | "system";
+  payment_category: "rent" | "arnona" | "utilities" | "other";
   created_at: string;
   tenant?: Tenant;
 }

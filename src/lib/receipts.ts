@@ -25,7 +25,7 @@ export async function issueReceiptForPayment(paymentId: string): Promise<IssueRe
   const { data: payment, error: payErr } = await supabase
     .from("payments")
     .select(`
-      id, tenant_id, contract_id, amount, month_paid_for,
+      id, tenant_id, contract_id, amount, month_paid_for, payment_category,
       icount_receipt_id, receipt_doc_number,
       tenant:tenants(full_name, id_number, email, accountbook_client_number),
       contract:contracts(legal_entity_id, legal_entity:legal_entities(id, name))
@@ -58,7 +58,23 @@ export async function issueReceiptForPayment(paymentId: string): Promise<IssueRe
   if (!tenant) return { success: false, error: "tenant_missing" };
 
   const entityName = contract?.legal_entity?.name || "";
- 
+
+  // Document type per category:
+  //   rent → חשבונית מס/קבלה (320). Anything else → קבלה (400).
+  const category = (payment.payment_category as
+    | "rent"
+    | "arnona"
+    | "utilities"
+    | "other"
+    | null
+    | undefined) || "rent";
+  const docType = category === "rent" ? "invoice_receipt" : "receipt";
+  const categoryLabel: Record<typeof category, string> = {
+    rent: "שכר דירה",
+    arnona: "ארנונה",
+    utilities: "חשבונות",
+    other: "תשלום",
+  };
 
   try {
     const doc = await createAccountbookDocument({
@@ -67,8 +83,8 @@ export async function issueReceiptForPayment(paymentId: string): Promise<IssueRe
       client_email: tenant.email || undefined,
       client_number: tenant.accountbook_client_number ?? undefined,
       amount: Number(payment.amount),
-      description: `שכר דירה — ${payment.month_paid_for}`,
-      type: "invoice_receipt",
+      description: `${categoryLabel[category]} — ${payment.month_paid_for}`,
+      type: docType,
     });
 
     await supabase
@@ -82,13 +98,16 @@ export async function issueReceiptForPayment(paymentId: string): Promise<IssueRe
       })
       .eq("id", payment.id);
 
+    const docLabel = docType === "invoice_receipt" ? "חשבונית מס/קבלה" : "קבלה";
+    const filePrefix = docType === "invoice_receipt" ? "invoice_receipt" : "receipt";
+
     if (contract?.legal_entity_id) {
       await supabase.from("invoices").insert({
         tenant_id: payment.tenant_id,
         payment_id: payment.id,
         legal_entity_id: contract.legal_entity_id,
         icount_id: doc.id,
-        invoice_type: "receipt",
+        invoice_type: docType,
         amount: Number(payment.amount),
         issue_date: new Date().toISOString().split("T")[0],
         pdf_url: doc.url,
@@ -100,7 +119,7 @@ export async function issueReceiptForPayment(paymentId: string): Promise<IssueRe
       entity_type: "payment",
       entity_id: payment.id,
       action: "receipt_issued",
-      description: `קבלה #${doc.number} — ₪${Number(payment.amount).toLocaleString()}`,
+      description: `${docLabel} #${doc.number} — ₪${Number(payment.amount).toLocaleString()}`,
       source: "system",
       performed_by: "system",
     });
@@ -111,7 +130,7 @@ export async function issueReceiptForPayment(paymentId: string): Promise<IssueRe
         await saveReceiptToDrive({
           tenantName: tenant.full_name,
           pdfUrl: doc.url,
-          fileName: `receipt_${doc.number}_${payment.month_paid_for.replace("/", "-")}.pdf`,
+          fileName: `${filePrefix}_${doc.number}_${payment.month_paid_for.replace("/", "-")}.pdf`,
         });
       } catch (err) {
         console.error("[receipts] drive backup failed:", err);

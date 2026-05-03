@@ -136,6 +136,7 @@ export function useCreatePayment() {
       notes?: string;
       created_by?: string;
       auto_issue_receipt?: boolean;
+      payment_category?: "rent" | "arnona" | "utilities" | "other";
     }) => {
       const { auto_issue_receipt, ...insertPayload } = payment;
 
@@ -164,6 +165,7 @@ export function useCreatePayment() {
         p_notes: insertPayload.notes || null,
         p_expected_amount: expectedAmount,
         p_created_by: insertPayload.created_by || "manual",
+        p_payment_category: insertPayload.payment_category || "rent",
       });
 
       if (error) throw error;
