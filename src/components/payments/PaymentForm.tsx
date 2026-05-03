@@ -32,7 +32,7 @@ export function PaymentForm({
   const [checkBank, setCheckBank] = useState("");
   const [checkDate, setCheckDate] = useState("");
   const [notes, setNotes] = useState("");
-  const [selectedContractId, setSelectedContractId] = useState("");
+  const [selectedContractId, setSelectedContractId] = useState(contractId || "");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [result, setResult] = useState<{
     paymentId: string;
@@ -42,7 +42,7 @@ export function PaymentForm({
       | { status: "failed"; error: string };
   } | null>(null);
 
-  const needsTenantPicker = !tenantId || !contractId;
+  const needsTenantPicker = !scheduleId;
   const { data: contracts, isLoading: contractsLoading } = useContracts(
     needsTenantPicker ? { status: "active" } : undefined
   );
@@ -50,7 +50,6 @@ export function PaymentForm({
   const contractOptions = useMemo(() => {
     if (!contracts) return [];
     return contracts.map((c) => {
-      console.log(JSON.stringify(c));
       const unit = c.unit?.unit_identifier || "";
       const property = c.unit?.property?.name || "";
       const suffix = [unit, property].filter(Boolean).join(" · ");
@@ -69,14 +68,14 @@ export function PaymentForm({
   const createPayment = useCreatePayment();
   const issueReceiptMut = useIssueReceipt();
 
-  const resolvedTenantId = tenantId || selectedContract?.tenant_id;
-  const resolvedContractId = contractId || selectedContractId;
+  const resolvedTenantId = needsTenantPicker ? selectedContract?.tenant_id : tenantId;
+  const resolvedContractId = needsTenantPicker ? selectedContractId : contractId;
 
   const resetForm = () => {
     setAmount(defaultAmount || 0);
     setNotes("");
     setCheckNumber("");
-    setSelectedContractId("");
+    setSelectedContractId(contractId || "");
     setSubmitError(null);
     setResult(null);
   };
