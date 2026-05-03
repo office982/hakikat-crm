@@ -76,7 +76,7 @@ export async function signIn(): Promise<void> {
   });
 
   const popup = window.open(
-    `${AUTH_BASE}/authorize?${params}`,
+    `${getAuthBase()}/authorize?${params}`,
     "ms_oauth",
     "width=520,height=680,scrollbars=yes"
   );
