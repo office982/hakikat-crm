@@ -6,33 +6,38 @@
 // stored in env so backups run unattended.
 //
 // Required env:
-//   ONEDRIVE_CLIENT_ID       — Microsoft app (public or confidential) client id
 //   ONEDRIVE_REFRESH_TOKEN   — refresh token issued with `offline_access`
-// Optional env:
+// Optional env (have built-in fallbacks to the shared Hakikat app registration):
+//   ONEDRIVE_CLIENT_ID       — Microsoft app (public or confidential) client id
+//   ONEDRIVE_TENANT_ID       — `consumers`, `common`, or a tenant guid
 //   ONEDRIVE_CLIENT_SECRET   — only for confidential clients
-//   ONEDRIVE_TENANT_ID       — `consumers` (default), `common`, or a tenant guid
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const SCOPES = "Files.ReadWrite offline_access";
 
+// Fallbacks for the shared Hakikat Azure AD app registration. Env vars
+// still win — these only kick in when nothing is provisioned.
+const DEFAULT_CLIENT_ID = "2a6a5e5e-04aa-4735-99d1-feecac3ee52a";
+const DEFAULT_TENANT_ID = "3a56e4e1-d64d-4c4c-a595-9245f7c53a8c";
+
 let cached: { token: string; expiresAt: number } | null = null;
 
 function tokenUrl(): string {
-  const tenant = process.env.ONEDRIVE_TENANT_ID || "consumers";
+  const tenant = process.env.ONEDRIVE_TENANT_ID || DEFAULT_TENANT_ID;
   return `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
 }
 
 export function isOneDriveServerConfigured(): boolean {
-  return !!(process.env.ONEDRIVE_CLIENT_ID && process.env.ONEDRIVE_REFRESH_TOKEN);
+  return !!process.env.ONEDRIVE_REFRESH_TOKEN;
 }
 
 async function getAccessToken(): Promise<string> {
   if (cached && Date.now() < cached.expiresAt - 60_000) return cached.token;
 
-  const clientId = process.env.ONEDRIVE_CLIENT_ID;
+  const clientId = process.env.ONEDRIVE_CLIENT_ID || DEFAULT_CLIENT_ID;
   const refresh = process.env.ONEDRIVE_REFRESH_TOKEN;
-  if (!clientId || !refresh) {
-    throw new Error("OneDrive server not configured (ONEDRIVE_CLIENT_ID + ONEDRIVE_REFRESH_TOKEN required)");
+  if (!refresh) {
+    throw new Error("OneDrive server not configured (ONEDRIVE_REFRESH_TOKEN required)");
   }
 
   const body = new URLSearchParams({
