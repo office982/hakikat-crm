@@ -68,7 +68,7 @@ export async function issueReceiptForPayment(paymentId: string): Promise<IssueRe
       client_number: tenant.accountbook_client_number ?? undefined,
       amount: Number(payment.amount),
       description: `שכר דירה — ${payment.month_paid_for}`,
-      type: "receipt",
+      type: "invoice_receipt",
     });
 
     await supabase
