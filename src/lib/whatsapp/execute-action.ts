@@ -96,6 +96,14 @@ async function dispatch(
     case "list_recent_checks": return handleListRecentChecks(data);
     case "list_recent_alerts": return handleListRecentAlerts(data);
     case "mark_expense_paid": return handleMarkExpensePaid(data);
+    case "clarify":
+      // The AI asked for missing info — just relay the question. No DB hit.
+      return {
+        success: true,
+        message:
+          response.response_message ||
+          "אני צריך עוד פרטים — פרט בבקשה.",
+      };
     default:
       return {
         success: true,
@@ -145,10 +153,24 @@ async function handleRecordPayment(
 
   const amount = Number(data.amount);
   const monthPaidFor = String(data.month || "");
-  const method = String(data.payment_method || "transfer");
+  const method = String(data.payment_method || "");
 
-  if (!amount || !monthPaidFor)
-    return { success: false, message: "חסר סכום או חודש — נסה שוב." };
+  if (!amount) return { success: false, message: "חסר סכום — נסה שוב." };
+  if (!monthPaidFor || !/^\d{2}\/\d{4}$/.test(monthPaidFor))
+    return {
+      success: false,
+      message: "חסר חודש מלא (פורמט MM/YYYY, למשל 04/2026) — נסה שוב.",
+    };
+  if (!["transfer", "cash", "check"].includes(method))
+    return {
+      success: false,
+      message: "חסר אמצעי תשלום — ציין: העברה / מזומן / צ'ק.",
+    };
+  if (method === "check" && !data.check_number)
+    return {
+      success: false,
+      message: "תשלום בצ'ק — חסר מספר הצ'ק (ורצוי גם שם הבנק).",
+    };
 
   // Find matching schedule row
   const { data: schedule } = await supabase

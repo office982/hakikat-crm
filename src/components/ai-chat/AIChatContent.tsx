@@ -201,6 +201,7 @@ export function AIChatContent() {
     list_recent_checks: "צ'קים אחרונים",
     list_recent_alerts: "התראות אחרונות",
     mark_expense_paid: "סימון תשלום ספק",
+    clarify: "צריך הבהרה",
   };
 
   return (
