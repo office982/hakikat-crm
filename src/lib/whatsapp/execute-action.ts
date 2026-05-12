@@ -1051,10 +1051,17 @@ async function handleSendContractForSignature(
     | null;
   const legalEntity = contract.legal_entity as unknown as { name: string } | null;
 
+  // Fetch the tenant's id_number — required for the signature ceremony.
+  const { data: tenantRow } = await supabase
+    .from("tenants")
+    .select("id_number")
+    .eq("id", tenant.id)
+    .maybeSingle();
+
   const { generateContractText } = await import("@/lib/api/claude");
   const contractText = await generateContractText({
     tenant_name: tenant.full_name,
-    id_number: String(data.id_number || ""),
+    id_number: String(tenantRow?.id_number || data.id_number || ""),
     unit: unit?.unit_identifier || "",
     property: unit?.property?.name || unit?.property?.address || "",
     start_date: contract.start_date,
