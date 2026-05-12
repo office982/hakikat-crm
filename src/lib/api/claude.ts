@@ -83,6 +83,42 @@ const SYSTEM_PROMPT = `אתה סוכן AI של קבוצת חקיקת — מער�
     data: { project_name }
     confirmation_needed: false
 
+16. list_expiring_contracts — חוזים שפגים בקרוב
+    data: { days?: number }   // ברירת מחדל 60
+    confirmation_needed: false
+
+17. send_contract_for_signature — שליחת חוזה לחתימה דיגיטלית
+    data: { tenant_name }
+    confirmation_needed: true
+
+18. list_properties — רשימת כל הנכסים + תפוסה
+    data: {}
+    confirmation_needed: false
+
+19. list_vacant_units — רשימת יחידות פנויות (להשכרה)
+    data: {}
+    confirmation_needed: false
+
+20. query_occupancy — סיכום תפוסה כללי (סה"כ / תפוסות / פנויות / %)
+    data: {}
+    confirmation_needed: false
+
+21. query_property — מצב נכס בודד (יחידות, תפוסה, מחיר מוצע)
+    data: { property_name }
+    confirmation_needed: false
+
+22. list_recent_checks — צ'קים אחרונים שנסרקו/נרשמו
+    data: { limit?: number }   // ברירת מחדל 10
+    confirmation_needed: false
+
+23. list_recent_alerts — התראות אחרונות במערכת
+    data: { limit?: number, unread_only?: boolean }
+    confirmation_needed: false
+
+24. mark_expense_paid — סימון הוצאת פרויקט כשולמה
+    data: { project_name, supplier_name?, amount? }
+    confirmation_needed: true
+
 ────────────────────────
 כללים:
 - תאריכים: "מ-1.6.26" = "2026-06-01", "עד 31.5.27" = "2027-05-31"
@@ -100,6 +136,15 @@ const SYSTEM_PROMPT = `אתה סוכן AI של קבוצת חקיקת — מער�
 - "מחק פרויקט", "סגור פרויקט" = delete_project
 - "מי בפיגור", "מי לא שילם" = list_overdue
 - "מה המצב בפרויקט X", "תקציב פרויקט", "כמה נשאר ב X" = query_project_status
+- "חוזים שפגים", "מי נגמר לו החוזה", "חידושים" = list_expiring_contracts
+- "שלח לחתימה", "תשלח חוזה ל X לחתימה" = send_contract_for_signature
+- "אילו נכסים יש", "רשימת נכסים", "תראה לי נכסים" = list_properties
+- "מה פנוי", "יחידות פנויות", "מה להשכרה" = list_vacant_units
+- "כמה תפוסה", "מצב תפוסה", "כמה פנוי" = query_occupancy
+- "מה המצב בנכס X", "תראה לי את נכס X" = query_property
+- "צ'קים אחרונים", "אילו צ'קים נסרקו" = list_recent_checks
+- "אילו התראות יש", "התראות חדשות", "מה חדש" = list_recent_alerts
+- "סמן ששילמתי ל X", "ההוצאה של X שולמה", "שילמתי ל X את החשבונית" = mark_expense_paid
 - אם המשתמש שולח תמונה (לא טקסט) — תמיד מדובר בצ'ק לסריקה. הטיפול נעשה ב-pipeline נפרד.
 - אם לא ברור — שאל שאלת הבהרה (action: "unknown")
 

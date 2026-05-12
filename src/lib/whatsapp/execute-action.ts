@@ -18,6 +18,8 @@ const NOTIFY_TITLE: Record<string, (data: Record<string, unknown>) => string> = 
   renew_contract: (d) => `🔁 חידוש חוזה — ${d.tenant_name}`,
   create_project: (d) => `📁 פרויקט חדש — ${d.project_name || d.name}`,
   delete_project: (d) => `🗑 פרויקט נמחק — ${d.project_name}`,
+  send_contract_for_signature: (d) => `📤 חוזה נשלח לחתימה — ${d.tenant_name}`,
+  mark_expense_paid: (d) => `✅ הוצאה שולמה — ${d.project_name}`,
 };
 
 const NOTIFY_ENTITY_TYPE: Record<string, string> = {
@@ -29,6 +31,8 @@ const NOTIFY_ENTITY_TYPE: Record<string, string> = {
   renew_contract: "contract",
   create_project: "project",
   delete_project: "project",
+  send_contract_for_signature: "contract",
+  mark_expense_paid: "project",
 };
 
 export interface ActionResult {
@@ -83,6 +87,15 @@ async function dispatch(
     case "delete_project": return handleDeleteProject(data);
     case "list_overdue": return handleListOverdue();
     case "query_project_status": return handleQueryProjectStatus(data);
+    case "list_expiring_contracts": return handleListExpiringContracts(data);
+    case "send_contract_for_signature": return handleSendContractForSignature(data);
+    case "list_properties": return handleListProperties();
+    case "list_vacant_units": return handleListVacantUnits();
+    case "query_occupancy": return handleQueryOccupancy();
+    case "query_property": return handleQueryProperty(data);
+    case "list_recent_checks": return handleListRecentChecks(data);
+    case "list_recent_alerts": return handleListRecentAlerts(data);
+    case "mark_expense_paid": return handleMarkExpensePaid(data);
     default:
       return {
         success: true,
@@ -962,6 +975,352 @@ async function handleListOverdue(): Promise<ActionResult> {
     msg += `\n• ${name} — ₪${info.total.toLocaleString()} (${info.months.join(", ")})`;
   }
   return { success: true, message: msg };
+}
+
+// ─── list_expiring_contracts ─────────────────────────────────────
+async function handleListExpiringContracts(
+  data: Record<string, unknown>
+): Promise<ActionResult> {
+  const days = Number(data.days || 60);
+  const today = new Date();
+  const cutoff = new Date();
+  cutoff.setDate(today.getDate() + days);
+
+  const { data: rows } = await supabase
+    .from("contracts")
+    .select(
+      `id, end_date, monthly_rent, status,
+       tenant:tenants(full_name, phone)`
+    )
+    .eq("status", "active")
+    .gte("end_date", today.toISOString().split("T")[0])
+    .lte("end_date", cutoff.toISOString().split("T")[0])
+    .order("end_date", { ascending: true })
+    .limit(30);
+
+  if (!rows || rows.length === 0) {
+    return {
+      success: true,
+      message: `✅ אין חוזים שפגים ב-${days} הימים הקרובים.`,
+    };
+  }
+
+  let msg = `📅 חוזים שפגים ב-${days} הימים הקרובים (${rows.length}):\n`;
+  for (const c of rows) {
+    const t = c.tenant as unknown as { full_name: string; phone: string } | null;
+    const name = t?.full_name || "ללא שם";
+    msg += `\n• ${name} — פג ${c.end_date} (₪${Number(c.monthly_rent).toLocaleString()}/חודש)`;
+  }
+  return { success: true, message: msg };
+}
+
+// ─── send_contract_for_signature ─────────────────────────────────
+async function handleSendContractForSignature(
+  data: Record<string, unknown>
+): Promise<ActionResult> {
+  const tenant = await resolveTenant(data);
+  if (!tenant)
+    return { success: false, message: `לא מצאתי דייר בשם "${data.tenant_name}".` };
+
+  // Find the most recent pending-signature contract; fall back to active.
+  const { data: contract } = await supabase
+    .from("contracts")
+    .select(
+      `id, status, monthly_rent, start_date, end_date, building_fee, arnona,
+       annual_increase_percent,
+       unit:units(unit_identifier, property:properties(name, address)),
+       legal_entity:legal_entities(name)`
+    )
+    .eq("tenant_id", tenant.id)
+    .in("status", ["pending_signature", "active"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!contract)
+    return { success: false, message: `אין חוזה ל${tenant.full_name} שניתן לשלוח לחתימה.` };
+
+  if (contract.status === "active") {
+    return { success: false, message: `החוזה של ${tenant.full_name} כבר חתום ופעיל.` };
+  }
+
+  // Render the contract text via the AI helper, then POST to the existing
+  // send-for-signature endpoint. This is exactly what the wizard does.
+  const unit = contract.unit as unknown as
+    | { unit_identifier: string; property: { name: string; address: string | null } | null }
+    | null;
+  const legalEntity = contract.legal_entity as unknown as { name: string } | null;
+
+  const { generateContractText } = await import("@/lib/api/claude");
+  const contractText = await generateContractText({
+    tenant_name: tenant.full_name,
+    id_number: String(data.id_number || ""),
+    unit: unit?.unit_identifier || "",
+    property: unit?.property?.name || unit?.property?.address || "",
+    start_date: contract.start_date,
+    end_date: contract.end_date,
+    monthly_rent: Number(contract.monthly_rent),
+    annual_increase: Number(contract.annual_increase_percent || 0),
+    building_fee: Number(contract.building_fee || 0),
+    arnona: Number(contract.arnona || 0),
+    entity_name: legalEntity?.name || "",
+  });
+
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+  const res = await fetch(`${baseUrl}/api/contracts/${contract.id}/send-for-signature`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contract_text: contractText }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    return {
+      success: false,
+      message: `שגיאה בשליחה לחתימה: ${err.slice(0, 200)}`,
+    };
+  }
+
+  return {
+    success: true,
+    message: `📤 החוזה של ${tenant.full_name} נשלח לחתימה דיגיטלית. ממתין לחתימת הדייר.`,
+  };
+}
+
+// ─── list_properties ─────────────────────────────────────────────
+async function handleListProperties(): Promise<ActionResult> {
+  const { data: properties } = await supabase
+    .from("properties")
+    .select(`
+      id, name, address, city, property_type, suggested_rent,
+      units(id, is_occupied)
+    `)
+    .order("name", { ascending: true })
+    .limit(50);
+
+  if (!properties || properties.length === 0)
+    return { success: true, message: "אין נכסים במערכת." };
+
+  let msg = `🏢 נכסים (${properties.length}):\n`;
+  for (const p of properties) {
+    const units = (p.units as { id: string; is_occupied: boolean }[]) || [];
+    const occupied = units.filter((u) => u.is_occupied).length;
+    const typeHe =
+      p.property_type === "residential" ? "מגורים" :
+      p.property_type === "commercial" ? "מסחרי" : "מעורב";
+    msg += `\n• ${p.name} (${typeHe}) — ${occupied}/${units.length} תפוסות`;
+    if (p.address) msg += `\n  ${p.address}${p.city ? ", " + p.city : ""}`;
+  }
+  return { success: true, message: msg };
+}
+
+// ─── list_vacant_units ───────────────────────────────────────────
+async function handleListVacantUnits(): Promise<ActionResult> {
+  const { data: units } = await supabase
+    .from("units")
+    .select(
+      `id, unit_identifier, unit_type, floor, size_sqm,
+       property:properties(name, suggested_rent)`
+    )
+    .eq("is_occupied", false)
+    .limit(50);
+
+  if (!units || units.length === 0)
+    return { success: true, message: "✅ אין יחידות פנויות — הכל תפוס." };
+
+  let msg = `🔓 יחידות פנויות (${units.length}):\n`;
+  for (const u of units) {
+    const prop = u.property as unknown as { name: string; suggested_rent: number | null } | null;
+    const propName = prop?.name || "ללא נכס";
+    const rent = prop?.suggested_rent ? ` — מוצע ₪${Number(prop.suggested_rent).toLocaleString()}` : "";
+    const floor = u.floor != null ? `, קומה ${u.floor}` : "";
+    const size = u.size_sqm ? `, ${u.size_sqm} מ״ר` : "";
+    msg += `\n• ${propName} — ${u.unit_identifier}${floor}${size}${rent}`;
+  }
+  return { success: true, message: msg };
+}
+
+// ─── query_occupancy ─────────────────────────────────────────────
+async function handleQueryOccupancy(): Promise<ActionResult> {
+  const { count: totalUnits } = await supabase
+    .from("units")
+    .select("id", { count: "exact", head: true });
+  const { count: occupied } = await supabase
+    .from("units")
+    .select("id", { count: "exact", head: true })
+    .eq("is_occupied", true);
+
+  const total = totalUnits || 0;
+  const occ = occupied || 0;
+  const pct = total > 0 ? Math.round((occ / total) * 100) : 0;
+  const vacant = total - occ;
+
+  let msg = `📊 תפוסה כוללת:\n`;
+  msg += `• סה"כ יחידות: ${total}\n`;
+  msg += `• תפוסות: ${occ}\n`;
+  msg += `• פנויות: ${vacant}\n`;
+  msg += `• אחוז תפוסה: ${pct}%`;
+  return { success: true, message: msg };
+}
+
+// ─── query_property ──────────────────────────────────────────────
+async function handleQueryProperty(
+  data: Record<string, unknown>
+): Promise<ActionResult> {
+  const name = String(data.property_name || data.name || "").trim();
+  if (!name) return { success: false, message: "חסר שם נכס." };
+
+  const { data: matches } = await supabase
+    .from("properties")
+    .select(
+      `id, name, address, city, property_type, suggested_rent,
+       units(id, unit_identifier, is_occupied)`
+    )
+    .or(`name.ilike.%${name}%,address.ilike.%${name}%`)
+    .limit(1);
+
+  const prop = matches?.[0];
+  if (!prop) return { success: false, message: `לא מצאתי נכס "${name}".` };
+
+  const units = (prop.units as { id: string; unit_identifier: string; is_occupied: boolean }[]) || [];
+  const occupied = units.filter((u) => u.is_occupied).length;
+  const vacant = units.length - occupied;
+  const typeHe =
+    prop.property_type === "residential" ? "מגורים" :
+    prop.property_type === "commercial" ? "מסחרי" : "מעורב";
+
+  let msg = `🏢 ${prop.name} (${typeHe}):\n`;
+  if (prop.address) msg += `• כתובת: ${prop.address}${prop.city ? ", " + prop.city : ""}\n`;
+  msg += `• יחידות: ${units.length} (תפוסות: ${occupied}, פנויות: ${vacant})\n`;
+  if (prop.suggested_rent) {
+    msg += `• מחיר מוצע: ₪${Number(prop.suggested_rent).toLocaleString()}/חודש\n`;
+  }
+  if (vacant > 0) {
+    const vacantList = units.filter((u) => !u.is_occupied).map((u) => u.unit_identifier);
+    msg += `• פנויות: ${vacantList.join(", ")}`;
+  }
+  return { success: true, message: msg };
+}
+
+// ─── list_recent_checks ──────────────────────────────────────────
+async function handleListRecentChecks(
+  data: Record<string, unknown>
+): Promise<ActionResult> {
+  const limit = Math.min(Math.max(Number(data.limit || 10), 1), 30);
+
+  const { data: checks } = await supabase
+    .from("checks")
+    .select(
+      `id, check_number, amount, due_date, status, for_month, bank_name,
+       tenant:tenants(full_name)`
+    )
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (!checks || checks.length === 0)
+    return { success: true, message: "אין צ'קים במערכת." };
+
+  const statusLabel: Record<string, string> = {
+    pending: "ממתין",
+    deposited: "הופקד",
+    bounced: "🔴 חזר",
+    cancelled: "בוטל",
+  };
+
+  let msg = `🧾 צ'קים אחרונים (${checks.length}):\n`;
+  for (const c of checks) {
+    const t = c.tenant as unknown as { full_name: string } | null;
+    const name = t?.full_name || "ללא שם";
+    const bank = c.bank_name ? ` [${c.bank_name}]` : "";
+    msg += `\n• ${name} — צ'ק ${c.check_number}${bank}, ₪${Number(c.amount).toLocaleString()}, ${c.for_month}, ${statusLabel[c.status] || c.status}`;
+  }
+  return { success: true, message: msg };
+}
+
+// ─── list_recent_alerts ──────────────────────────────────────────
+async function handleListRecentAlerts(
+  data: Record<string, unknown>
+): Promise<ActionResult> {
+  const limit = Math.min(Math.max(Number(data.limit || 10), 1), 30);
+  const onlyUnread = Boolean(data.unread_only);
+
+  let query = supabase
+    .from("notifications")
+    .select("type, title, message, is_read, created_at")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (onlyUnread) query = query.eq("is_read", false);
+
+  const { data: rows } = await query;
+
+  if (!rows || rows.length === 0)
+    return { success: true, message: onlyUnread ? "✅ אין התראות חדשות." : "אין התראות במערכת." };
+
+  let msg = `🔔 התראות אחרונות (${rows.length}):\n`;
+  for (const n of rows) {
+    const when = new Date(n.created_at).toLocaleDateString("he-IL");
+    const dot = n.is_read ? "○" : "●";
+    msg += `\n${dot} ${n.title} — ${when}`;
+  }
+  return { success: true, message: msg };
+}
+
+// ─── mark_expense_paid ───────────────────────────────────────────
+async function handleMarkExpensePaid(
+  data: Record<string, unknown>
+): Promise<ActionResult> {
+  const project = await resolveProject(data);
+  if (!project)
+    return { success: false, message: `לא מצאתי פרויקט "${data.project_name}".` };
+
+  const supplierName = data.supplier_name ? String(data.supplier_name) : null;
+  const amount = data.amount != null ? Number(data.amount) : null;
+
+  let query = supabase
+    .from("project_expenses")
+    .select("id, supplier_name, amount, status")
+    .eq("project_id", project.id)
+    .eq("status", "unpaid")
+    .order("invoice_date", { ascending: false });
+
+  if (supplierName) query = query.ilike("supplier_name", `%${supplierName}%`);
+  if (amount) query = query.eq("amount", amount);
+
+  const { data: matches } = await query.limit(2);
+
+  if (!matches || matches.length === 0)
+    return {
+      success: false,
+      message: `לא מצאתי הוצאה לא משולמת בפרויקט ${project.name}${supplierName ? ` עבור ${supplierName}` : ""}.`,
+    };
+
+  if (matches.length > 1)
+    return {
+      success: false,
+      message: `נמצאו ${matches.length} הוצאות לא משולמות שמתאימות — ציין סכום או ספק כדי להבחין.`,
+    };
+
+  const expense = matches[0];
+  const { error } = await supabase
+    .from("project_expenses")
+    .update({ status: "paid" })
+    .eq("id", expense.id);
+
+  if (error) throw error;
+
+  await logAction(
+    "project",
+    project.id,
+    "expense_paid",
+    `הוצאה סומנה כשולמה: ${expense.supplier_name} — ₪${Number(expense.amount).toLocaleString()}`,
+    "whatsapp"
+  );
+
+  return {
+    success: true,
+    message: `✅ הוצאה סומנה כשולמה — ${expense.supplier_name} ₪${Number(expense.amount).toLocaleString()} בפרויקט ${project.name}.`,
+  };
 }
 
 // ─── WhatsApp image (check) handler ──────────────────────────────
