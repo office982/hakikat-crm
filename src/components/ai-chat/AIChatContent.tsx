@@ -192,6 +192,15 @@ export function AIChatContent() {
     list_overdue: "רשימת חייבים",
     query_project_status: "מצב פרויקט",
     _issue_receipt: "הנפקת קבלה",
+    list_expiring_contracts: "חוזים שפגים",
+    send_contract_for_signature: "שליחה לחתימה",
+    list_properties: "רשימת נכסים",
+    list_vacant_units: "יחידות פנויות",
+    query_occupancy: "תפוסה כללית",
+    query_property: "מצב נכס",
+    list_recent_checks: "צ'קים אחרונים",
+    list_recent_alerts: "התראות אחרונות",
+    mark_expense_paid: "סימון תשלום ספק",
   };
 
   return (
