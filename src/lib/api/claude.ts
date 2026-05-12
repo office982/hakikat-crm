@@ -120,10 +120,30 @@ export interface AIAgentResponse {
   response_message: string;
 }
 
-export async function callAIAgent(userMessage: string): Promise<AIAgentResponse> {
+export interface AIAgentTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/**
+ * Call the AI agent with optional prior turns for multi-turn context.
+ *
+ * `history` should be the running transcript (oldest first). The new
+ * user message is appended automatically — do NOT include it twice.
+ */
+export async function callAIAgent(
+  userMessage: string,
+  history: AIAgentTurn[] = []
+): Promise<AIAgentResponse> {
   if (!getApiKey()) {
     throw new Error("ANTHROPIC_API_KEY is not configured");
   }
+
+  // Keep the last ~8 turns to stay within budget while preserving context.
+  const trimmedHistory = history.slice(-8).map((t) => ({
+    role: t.role,
+    content: t.content,
+  }));
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -137,10 +157,8 @@ export async function callAIAgent(userMessage: string): Promise<AIAgentResponse>
       max_tokens: 1024,
       system: SYSTEM_PROMPT,
       messages: [
-        {
-          role: "user",
-          content: userMessage,
-        },
+        ...trimmedHistory,
+        { role: "user", content: userMessage },
       ],
     }),
   });
@@ -153,9 +171,28 @@ export async function callAIAgent(userMessage: string): Promise<AIAgentResponse>
   const result = await response.json();
   const text = result.content?.[0]?.text || "";
 
-  // Extract JSON from response
+  // Extract JSON from response — be permissive about surrounding prose.
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
+    return {
+      action: "unknown",
+      data: {},
+      confirmation_needed: false,
+      confirmation_message: "",
+      response_message: text.trim() || "לא הצלחתי להבין את הבקשה. נסה שוב.",
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]) as Partial<AIAgentResponse>;
+    return {
+      action: String(parsed.action || "unknown"),
+      data: (parsed.data as Record<string, unknown>) || {},
+      confirmation_needed: Boolean(parsed.confirmation_needed),
+      confirmation_message: String(parsed.confirmation_message || ""),
+      response_message: String(parsed.response_message || ""),
+    };
+  } catch {
     return {
       action: "unknown",
       data: {},
@@ -164,8 +201,6 @@ export async function callAIAgent(userMessage: string): Promise<AIAgentResponse>
       response_message: "לא הצלחתי להבין את הבקשה. נסה שוב.",
     };
   }
-
-  return JSON.parse(jsonMatch[0]);
 }
 
 export async function generateContractText(params: {

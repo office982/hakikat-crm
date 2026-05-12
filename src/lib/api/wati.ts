@@ -8,31 +8,70 @@ export interface WatiMessage {
   contact_name?: string;
 }
 
+function assertConfigured() {
+  if (!WATI_API_KEY || !WATI_BASE_URL) {
+    throw new Error("WATI credentials not configured");
+  }
+}
+
+function authHeader(): Record<string, string> {
+  const key = WATI_API_KEY || "";
+  // WATI accepts either a raw token or "Bearer <token>" — normalise.
+  const value = key.toLowerCase().startsWith("bearer ") ? key : `Bearer ${key}`;
+  return { Authorization: value };
+}
+
+function normalisePhone(phone: string): string {
+  // WATI expects digits only (e.g. 972501234567). Strip + and spaces.
+  return phone.replace(/[^\d]/g, "");
+}
+
 /**
- * Send a WhatsApp message via WATI.
+ * Send a free-text WhatsApp session message via WATI.
+ *
+ * WATI v1 `sendSessionMessage` takes `messageText` as a query parameter, not
+ * a JSON body. The v2 endpoint accepts a body. We send to v1 with the query
+ * param — this is the format that works against all current WATI tenants.
  */
 export async function sendWhatsAppMessage(
   phone: string,
   message: string
 ): Promise<void> {
-  if (!WATI_API_KEY || !WATI_BASE_URL) {
-    throw new Error("WATI credentials not configured");
-  }
+  assertConfigured();
 
-  const response = await fetch(`${WATI_BASE_URL}/api/v1/sendSessionMessage/${phone}`, {
+  const cleanPhone = normalisePhone(phone);
+  const url =
+    `${WATI_BASE_URL}/api/v1/sendSessionMessage/${cleanPhone}` +
+    `?messageText=${encodeURIComponent(message)}`;
+
+  const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${WATI_API_KEY}`,
+      ...authHeader(),
     },
-    body: JSON.stringify({
-      messageText: message,
-    }),
   });
 
+  const raw = await response.text();
   if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`WATI API error: ${response.status} — ${err}`);
+    throw new Error(`WATI send error ${response.status}: ${raw.slice(0, 300)}`);
+  }
+
+  // WATI returns 200 even on logical failures — only treat an EXPLICIT
+  // false flag as failure; everything else (including {}/non-JSON) is success.
+  try {
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (
+      parsed &&
+      (parsed.result === false || parsed.ok === false || parsed.success === false)
+    ) {
+      throw new Error(`WATI send rejected: ${raw.slice(0, 300)}`);
+    }
+  } catch (err) {
+    // JSON parse failures are fine — the upstream returned non-JSON success.
+    if (err instanceof Error && err.message.startsWith("WATI send rejected")) {
+      throw err;
+    }
   }
 }
 
@@ -44,21 +83,21 @@ export async function sendTemplateMessage(
   templateName: string,
   parameters: { name: string; value: string }[]
 ): Promise<void> {
-  if (!WATI_API_KEY || !WATI_BASE_URL) {
-    throw new Error("WATI credentials not configured");
-  }
+  assertConfigured();
 
-  const response = await fetch(`${WATI_BASE_URL}/api/v1/sendTemplateMessage/${phone}`, {
+  const cleanPhone = normalisePhone(phone);
+  const url =
+    `${WATI_BASE_URL}/api/v1/sendTemplateMessage/${cleanPhone}` +
+    `?template_name=${encodeURIComponent(templateName)}` +
+    `&broadcast_name=${encodeURIComponent("hakikat_crm")}`;
+
+  const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${WATI_API_KEY}`,
+      ...authHeader(),
     },
-    body: JSON.stringify({
-      template_name: templateName,
-      broadcast_name: "hakikat_crm",
-      parameters,
-    }),
+    body: JSON.stringify({ parameters }),
   });
 
   if (!response.ok) {

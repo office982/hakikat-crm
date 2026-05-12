@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { Send, Bot, User, Loader2, CheckCircle, AlertTriangle } from "lucide-react";
+import { Send, Bot, User, Loader2, CheckCircle, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Message {
@@ -12,9 +12,23 @@ interface Message {
   role: "user" | "assistant";
   text: string;
   action?: string;
-  confirmationNeeded?: boolean;
-  confirmationMessage?: string;
+  pendingId?: string;
+  pendingResolved?: "confirmed" | "rejected";
   timestamp: Date;
+}
+
+const SESSION_KEY = "ai-chat-session-id";
+
+function getSessionId(): string {
+  if (typeof window === "undefined") return "anon";
+  let id = window.localStorage.getItem(SESSION_KEY);
+  if (!id) {
+    id =
+      (window.crypto?.randomUUID?.() as string | undefined) ||
+      `s-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    window.localStorage.setItem(SESSION_KEY, id);
+  }
+  return id;
 }
 
 export function AIChatContent() {
@@ -28,22 +42,44 @@ export function AIChatContent() {
   ]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [busyPending, setBusyPending] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Build the rolling transcript that gets sent to Claude as history.
+  function buildHistory(): { role: "user" | "assistant"; content: string }[] {
+    return messages
+      .filter((m) => m.id !== "welcome")
+      .map((m) => ({ role: m.role, content: m.text }));
+  }
+
+  function appendAssistant(partial: Omit<Message, "id" | "role" | "timestamp">) {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        role: "assistant",
+        timestamp: new Date(),
+        ...partial,
+      },
+    ]);
+  }
+
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+    const trimmed = input.trim();
+    if (!trimmed || isLoading) return;
 
     const userMsg: Message = {
-      id: Date.now().toString(),
+      id: `u-${Date.now()}`,
       role: "user",
-      text: input.trim(),
+      text: trimmed,
       timestamp: new Date(),
     };
 
+    const history = buildHistory();
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setIsLoading(true);
@@ -52,55 +88,82 @@ export function AIChatContent() {
       const response = await fetch("/api/ai-agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userMsg.text }),
+        body: JSON.stringify({
+          message: trimmed,
+          session_id: getSessionId(),
+          history,
+        }),
       });
 
       const data = await response.json();
 
-      if (response.ok) {
-        const assistantMsg: Message = {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          text: data.response_message || data.confirmation_message || "קיבלתי!",
+      if (!response.ok) {
+        appendAssistant({
+          text: data.error || "שגיאה בעיבוד הבקשה. ודא שה-API key של Claude מוגדר.",
+        });
+      } else if (data.kind === "confirmation") {
+        appendAssistant({
+          text: data.confirmation_message || "האם לאשר?",
           action: data.action,
-          confirmationNeeded: data.confirmation_needed,
-          confirmationMessage: data.confirmation_message,
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
+          pendingId: data.pending_id,
+        });
       } else {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: (Date.now() + 1).toString(),
-            role: "assistant",
-            text: data.error || "שגיאה בעיבוד הבקשה. ודא שה-API key של Claude מוגדר בהגדרות.",
-            timestamp: new Date(),
-          },
-        ]);
+        appendAssistant({
+          text: data.message || "בוצע.",
+          action: data.action,
+        });
       }
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          text: "שגיאת חיבור. ודא שה-API key של Anthropic מוגדר ב-.env.local",
-          timestamp: new Date(),
-        },
-      ]);
+      appendAssistant({
+        text: "שגיאת חיבור. ודא שהשרת רץ ושה-API keys מוגדרים.",
+      });
     }
 
     setIsLoading(false);
   };
 
-  const handleConfirm = async (messageId: string) => {
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === messageId ? { ...m, confirmationNeeded: false, text: m.text + "\n\n✅ אושר!" } : m
-      )
-    );
-    // TODO: Execute the confirmed action via API
+  const resolvePending = async (
+    messageId: string,
+    pendingId: string,
+    decision: "confirm" | "reject"
+  ) => {
+    if (busyPending) return;
+    setBusyPending(pendingId);
+
+    try {
+      const res = await fetch("/api/ai-agent/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pending_id: pendingId, decision }),
+      });
+      const data = await res.json();
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? { ...m, pendingResolved: decision === "confirm" ? "confirmed" : "rejected" }
+            : m
+        )
+      );
+
+      appendAssistant({
+        text: data.message || (decision === "confirm" ? "בוצע." : "בוטל."),
+      });
+
+      // Chain follow-up confirmation (e.g. "להוציא קבלה?" after record_payment).
+      if (decision === "confirm" && data.follow_up?.pending_id) {
+        appendAssistant({
+          text: data.follow_up.confirmation_message,
+          pendingId: data.follow_up.pending_id,
+        });
+      }
+    } catch {
+      appendAssistant({
+        text: "שגיאת חיבור — נסה שוב.",
+      });
+    } finally {
+      setBusyPending(null);
+    }
   };
 
   const actionLabels: Record<string, string> = {
@@ -108,7 +171,18 @@ export function AIChatContent() {
     create_contract: "יצירת חוזה",
     add_project_expense: "הוצאת פרויקט",
     query_balance: "שאילתת יתרה",
+    query_report: "דוח חודשי",
     send_reminder: "שליחת תזכורת",
+    mark_check_bounced: "צ'ק חוזר",
+    renew_contract: "חידוש חוזה",
+    query_reliability: "דירוג אמינות",
+    compare_checks: "השוואת צ'קים",
+    create_project: "פרויקט חדש",
+    list_projects: "רשימת פרויקטים",
+    delete_project: "מחיקת פרויקט",
+    list_overdue: "רשימת חייבים",
+    query_project_status: "מצב פרויקט",
+    _issue_receipt: "הנפקת קבלה",
   };
 
   return (
@@ -137,14 +211,36 @@ export function AIChatContent() {
               {msg.action && msg.action !== "unknown" && (
                 <Badge variant="info" className="mt-2">{actionLabels[msg.action] || msg.action}</Badge>
               )}
-              {msg.confirmationNeeded && (
+              {msg.pendingId && !msg.pendingResolved && (
                 <div className="mt-3 flex gap-2">
-                  <Button size="sm" onClick={() => handleConfirm(msg.id)}>
-                    <CheckCircle className="w-3 h-3" />
+                  <Button
+                    size="sm"
+                    disabled={busyPending === msg.pendingId}
+                    onClick={() => resolvePending(msg.id, msg.pendingId!, "confirm")}
+                  >
+                    {busyPending === msg.pendingId ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <CheckCircle className="w-3 h-3" />
+                    )}
                     אשר
                   </Button>
-                  <Button variant="secondary" size="sm">ביטול</Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={busyPending === msg.pendingId}
+                    onClick={() => resolvePending(msg.id, msg.pendingId!, "reject")}
+                  >
+                    <XCircle className="w-3 h-3" />
+                    ביטול
+                  </Button>
                 </div>
+              )}
+              {msg.pendingResolved === "confirmed" && (
+                <Badge variant="success" className="mt-2">אושר</Badge>
+              )}
+              {msg.pendingResolved === "rejected" && (
+                <Badge variant="warning" className="mt-2">בוטל</Badge>
               )}
               <p className={cn(
                 "text-[10px] mt-1",

@@ -18,32 +18,45 @@ interface WatiWebhookPayload {
 }
 
 // Hebrew confirmation words
-const CONFIRM_YES = ["כן", "אישור", "כ", "בטח", "יאללה", "אשר", "yes", "1"];
-const CONFIRM_NO = ["לא", "ביטול", "בטל", "no", "0"];
+const CONFIRM_YES = ["כן", "אישור", "כ", "בטח", "יאללה", "אשר", "yes", "1", "✅", "v"];
+const CONFIRM_NO = ["לא", "ביטול", "בטל", "no", "0", "❌", "x"];
 
 /**
  * WATI Webhook — receives incoming WhatsApp messages.
  *
- * Full flow:
- * 1. Message arrives from WhatsApp
- * 2. Check if this is a confirmation reply (yes/no for a pending action)
- * 3. If confirmation — execute the stored pending action
- * 4. If new message — send to AI Agent
- *    a. If AI says confirmation_needed — store in pending_actions, ask user
- *    b. If no confirmation needed — execute directly, send response
+ * Flow:
+ *  1. Image/document → check-scanning pipeline
+ *  2. Text "yes/no" while a pending action is open → run/cancel it
+ *  3. Otherwise → call AI agent
+ *      a. confirmation_needed → store pending_action, ask user
+ *      b. else → execute directly, send result
  */
 export async function POST(request: NextRequest) {
+  let payload: WatiWebhookPayload;
   try {
-    const payload: WatiWebhookPayload = await request.json();
+    payload = (await request.json()) as WatiWebhookPayload;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
 
-    // Verify webhook token
-    const token = request.headers.get("x-webhook-token");
-    if (token !== process.env.WATI_WEBHOOK_TOKEN) {
+  // Verify webhook token. Accept header OR query param OR Authorization header.
+  const expected = process.env.WATI_WEBHOOK_TOKEN;
+  if (expected) {
+    const provided =
+      request.headers.get("x-webhook-token") ||
+      request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ||
+      request.nextUrl.searchParams.get("token");
+    if (provided !== expected) {
       return NextResponse.json({ error: "Invalid token" }, { status: 401 });
     }
+  }
 
-    const phone = payload.waId;
+  const phone = payload.waId;
+  if (!phone) {
+    return NextResponse.json({ received: true, skipped: "no waId" });
+  }
 
+  try {
     // ── Image / document → check scanning flow ──
     if ((payload.type === "image" || payload.type === "document") && payload.data) {
       try {
@@ -56,7 +69,10 @@ export async function POST(request: NextRequest) {
         await sendWhatsAppMessage(phone, result.message);
       } catch (err) {
         console.error("image handling failed:", err);
-        await sendWhatsAppMessage(phone, "⚠️ לא הצלחתי לעבד את התמונה — נסה שוב או שלח שוב עם שם הדייר בכיתוב.");
+        await sendWhatsAppMessage(
+          phone,
+          "⚠️ לא הצלחתי לעבד את התמונה — נסה שוב או שלח שוב עם שם הדייר בכיתוב."
+        );
       }
       return NextResponse.json({ received: true, action: "image_handled" });
     }
@@ -67,16 +83,19 @@ export async function POST(request: NextRequest) {
     }
 
     const text = payload.text.trim();
+    if (!text) {
+      return NextResponse.json({ received: true });
+    }
 
     console.log(`WhatsApp from ${phone}: ${text}`);
 
-    // ── Step 1: Check for pending confirmation ──
+    // ── Step 1: Pending confirmation? ──
     const handled = await handleConfirmationReply(phone, text);
     if (handled) {
       return NextResponse.json({ received: true, action: "confirmation_handled" });
     }
 
-    // ── Step 2: Process new message with AI Agent ──
+    // ── Step 2: AI agent ──
     let agentResponse;
     try {
       agentResponse = await callAIAgent(text);
@@ -87,19 +106,22 @@ export async function POST(request: NextRequest) {
     }
 
     if (agentResponse.confirmation_needed) {
-      // Store pending action for later confirmation
+      const summary =
+        agentResponse.confirmation_message ||
+        agentResponse.response_message ||
+        "האם לאשר את הפעולה?";
+
       await supabase.from("pending_actions").insert({
         phone,
         sender_name: payload.senderName || null,
         action: agentResponse.action,
         data: agentResponse.data,
-        confirmation_message: agentResponse.confirmation_message,
+        confirmation_message: summary,
         status: "pending",
       });
 
-      await sendWhatsAppMessage(phone, agentResponse.confirmation_message);
+      await sendWhatsAppMessage(phone, `${summary}\n\nענה: כן / לא`);
     } else {
-      // Execute directly (queries, balance checks, etc.)
       const result = await executeAction(agentResponse);
       await sendWhatsAppMessage(phone, result.message);
     }
@@ -107,12 +129,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true, action: agentResponse.action });
   } catch (error) {
     console.error("WATI webhook error:", error);
-    // Try to notify user of failure
     try {
-      const body = await request.clone().json().catch(() => null);
-      if (body?.waId) {
-        await sendWhatsAppMessage(body.waId, "⚠️ שגיאה במערכת — נסה שוב.");
-      }
+      await sendWhatsAppMessage(phone, "⚠️ שגיאה במערכת — נסה שוב.");
     } catch { /* best effort */ }
     return NextResponse.json(
       { error: "Webhook processing failed" },
@@ -131,15 +149,13 @@ async function handleConfirmationReply(
 ): Promise<boolean> {
   const normalized = text.trim().toLowerCase();
 
-  // Only check short messages that look like confirmation replies
   if (normalized.length > 20) return false;
 
-  const isYes = CONFIRM_YES.some((w) => normalized === w || normalized.startsWith(w));
-  const isNo = CONFIRM_NO.some((w) => normalized === w || normalized.startsWith(w));
+  const isYes = CONFIRM_YES.some((w) => normalized === w || normalized.startsWith(`${w} `));
+  const isNo = CONFIRM_NO.some((w) => normalized === w || normalized.startsWith(`${w} `));
 
   if (!isYes && !isNo) return false;
 
-  // Find the most recent pending action for this phone
   const { data: pending } = await supabase
     .from("pending_actions")
     .select("*")
@@ -148,7 +164,7 @@ async function handleConfirmationReply(
     .gt("expires_at", new Date().toISOString())
     .order("created_at", { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
   if (!pending) return false;
 
@@ -163,25 +179,21 @@ async function handleConfirmationReply(
     return true;
   }
 
-  // ── Yes — confirm & execute ──
-  // Idempotency: atomically mark as confirmed — if already confirmed, skip
-  const { data: updated } = await supabase
+  // ── Yes — atomically claim & execute ──
+  const { data: claimed } = await supabase
     .from("pending_actions")
     .update({ status: "confirmed", resolved_at: new Date().toISOString() })
     .eq("id", pending.id)
     .eq("status", "pending")
     .select("id")
-    .single();
+    .maybeSingle();
 
-  if (!updated) {
-    // Already confirmed/rejected by a previous request — skip
-    return true;
-  }
+  if (!claimed) return true;
 
   const actionData = pending.data as Record<string, unknown>;
 
   try {
-    // Handle internal follow-up actions
+    // Internal follow-up: issue receipt for a recently recorded payment.
     if (pending.action === "_issue_receipt") {
       const tenant = await resolveTenant(actionData);
       if (tenant) {
@@ -195,19 +207,15 @@ async function handleConfirmationReply(
       return true;
     }
 
-    // Execute the regular action
-    const agentResponse = {
+    const result = await executeAction({
       action: pending.action,
       data: actionData,
       confirmation_needed: false,
       confirmation_message: "",
       response_message: "",
-    };
+    });
 
-    const result = await executeAction(agentResponse);
     await sendWhatsAppMessage(phone, result.message);
-
-    // ── Post-action: chain follow-up confirmations ──
 
     // After payment recorded → ask about receipt
     if (pending.action === "record_payment" && result.success) {
@@ -220,6 +228,7 @@ async function handleConfirmationReply(
           amount: actionData.amount,
           month: actionData.month,
         },
+        confirmation_message: "להוציא קבלה?",
         status: "pending",
       });
       // The executeAction response already ends with "להוציא קבלה?"
