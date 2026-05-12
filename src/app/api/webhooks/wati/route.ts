@@ -122,8 +122,17 @@ export async function POST(request: NextRequest) {
 
       await sendWhatsAppMessage(phone, `${summary}\n\nענה: כן / לא`);
     } else {
+      // Two-message reply for WhatsApp too: acknowledgement first, then the
+      // executor's real result, so the user sees the bot reacting before the
+      // data lookup finishes.
+      const ack = agentResponse.response_message?.trim();
+      if (ack && ack.length < 200) {
+        await sendWhatsAppMessage(phone, ack);
+      }
       const result = await executeAction(agentResponse);
-      await sendWhatsAppMessage(phone, result.message);
+      if (!ack || result.message !== ack) {
+        await sendWhatsAppMessage(phone, result.message);
+      }
     }
 
     return NextResponse.json({ received: true, action: agentResponse.action });

@@ -69,12 +69,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Direct execution (queries, balance lookups, reports, …).
+    // We return BOTH the AI's acknowledgment ("בודק…") and the executor's
+    // real Hebrew reply so the UI can render them as two separate bubbles.
     const result = await executeAction(agentResponse);
 
     return NextResponse.json({
       kind: "result",
       action: agentResponse.action,
       success: result.success,
+      response_message: agentResponse.response_message || null,
       message: result.message,
     });
   } catch (error) {

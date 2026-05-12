@@ -108,9 +108,18 @@ export function AIChatContent() {
           pendingId: data.pending_id,
         });
       } else {
+        // Two-message reply: AI's acknowledgement first (if present), then the
+        // executor's real result. Yields a natural "working on it… → here's
+        // your answer" flow instead of one silent reply.
+        if (data.response_message && data.response_message !== data.message) {
+          appendAssistant({
+            text: data.response_message,
+            action: data.action,
+          });
+        }
         appendAssistant({
           text: data.message || "בוצע.",
-          action: data.action,
+          action: data.response_message ? undefined : data.action,
         });
       }
     } catch {
