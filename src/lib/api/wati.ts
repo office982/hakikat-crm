@@ -57,21 +57,42 @@ export async function sendWhatsAppMessage(
     throw new Error(`WATI send error ${response.status}: ${raw.slice(0, 300)}`);
   }
 
-  // WATI returns 200 even on logical failures — only treat an EXPLICIT
-  // false flag as failure; everything else (including {}/non-JSON) is success.
+  // WATI returns 200 even when Meta refuses delivery. The outer envelope
+  // (`result: "success"`) only confirms WATI received our request — the
+  // inner `message.statusString` reflects WhatsApp delivery.
+  let parsed: unknown = null;
   try {
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (
-      parsed &&
-      (parsed.result === false || parsed.ok === false || parsed.success === false)
-    ) {
-      throw new Error(`WATI send rejected: ${raw.slice(0, 300)}`);
-    }
-  } catch (err) {
-    // JSON parse failures are fine — the upstream returned non-JSON success.
-    if (err instanceof Error && err.message.startsWith("WATI send rejected")) {
-      throw err;
-    }
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch {
+    return; // non-JSON 200 — treat as success
+  }
+
+  if (!parsed || typeof parsed !== "object") return;
+  const p = parsed as Record<string, unknown>;
+
+  const innerStatusString =
+    p.message && typeof p.message === "object"
+      ? (p.message as Record<string, unknown>).statusString
+      : undefined;
+  const innerStatus =
+    p.message && typeof p.message === "object"
+      ? (p.message as Record<string, unknown>).status
+      : undefined;
+
+  const envelopeFailed =
+    p.result === false || p.ok === false || p.success === false;
+  const deliveryFailed =
+    typeof innerStatusString === "string" &&
+    innerStatusString.toUpperCase() === "FAILED";
+
+  if (envelopeFailed || deliveryFailed) {
+    const reason = deliveryFailed
+      ? `WhatsApp delivery FAILED (status=${innerStatus ?? "?"}, ` +
+        `statusString=${innerStatusString ?? "?"}). ` +
+        `Likely cause: WATI account / Meta Business Verification not complete, ` +
+        `phone-number approval pending, or recipient outside the 24h session window.`
+      : `WATI envelope rejected: ${raw.slice(0, 300)}`;
+    throw new Error(`WATI send rejected — ${reason}`);
   }
 }
 

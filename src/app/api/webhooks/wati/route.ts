@@ -5,6 +5,19 @@ import { executeAction, issueReceipt, handleWhatsAppCheckImage } from "@/lib/wha
 import { resolveTenant } from "@/lib/whatsapp/resolve-tenant";
 import { supabaseAdmin as supabase } from "@/lib/supabase";
 
+// Best-effort outbound send — logs but never throws. A WATI/Meta delivery
+// failure on one message must not abort the rest of the webhook flow
+// (e.g. ack failing should not prevent the real result from being sent).
+async function safeSend(phone: string, message: string): Promise<boolean> {
+  try {
+    await sendWhatsAppMessage(phone, message);
+    return true;
+  } catch (err) {
+    console.error("WATI send failed:", err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
 interface WatiWebhookPayload {
   waId: string;
   text: string;
@@ -66,10 +79,10 @@ export async function POST(request: NextRequest) {
           caption: payload.caption || payload.text || "",
           senderName: payload.senderName,
         });
-        await sendWhatsAppMessage(phone, result.message);
+        await safeSend(phone, result.message);
       } catch (err) {
         console.error("image handling failed:", err);
-        await sendWhatsAppMessage(
+        await safeSend(
           phone,
           "⚠️ לא הצלחתי לעבד את התמונה — נסה שוב או שלח שוב עם שם הדייר בכיתוב."
         );
@@ -101,7 +114,7 @@ export async function POST(request: NextRequest) {
       agentResponse = await callAIAgent(text);
     } catch (aiErr) {
       console.error("AI Agent error:", aiErr);
-      await sendWhatsAppMessage(phone, "⚠️ שגיאה בעיבוד ההודעה — נסה שוב בעוד רגע.");
+      await safeSend(phone, "⚠️ שגיאה בעיבוד ההודעה — נסה שוב בעוד רגע.");
       return NextResponse.json({ error: "AI agent failed" }, { status: 500 });
     }
 
@@ -120,27 +133,24 @@ export async function POST(request: NextRequest) {
         status: "pending",
       });
 
-      await sendWhatsAppMessage(phone, `${summary}\n\nענה: כן / לא`);
+      await safeSend(phone, `${summary}\n\nענה: כן / לא`);
     } else {
       // Two-message reply for WhatsApp too: acknowledgement first, then the
-      // executor's real result, so the user sees the bot reacting before the
-      // data lookup finishes.
+      // executor's real result. A failed ack must not block the real result.
       const ack = agentResponse.response_message?.trim();
       if (ack && ack.length < 200) {
-        await sendWhatsAppMessage(phone, ack);
+        await safeSend(phone, ack);
       }
       const result = await executeAction(agentResponse);
       if (!ack || result.message !== ack) {
-        await sendWhatsAppMessage(phone, result.message);
+        await safeSend(phone, result.message);
       }
     }
 
     return NextResponse.json({ received: true, action: agentResponse.action });
   } catch (error) {
     console.error("WATI webhook error:", error);
-    try {
-      await sendWhatsAppMessage(phone, "⚠️ שגיאה במערכת — נסה שוב.");
-    } catch { /* best effort */ }
+    await safeSend(phone, "⚠️ שגיאה במערכת — נסה שוב.");
     return NextResponse.json(
       { error: "Webhook processing failed" },
       { status: 500 }
@@ -184,7 +194,7 @@ async function handleConfirmationReply(
       .update({ status: "rejected", resolved_at: new Date().toISOString() })
       .eq("id", pending.id);
 
-    await sendWhatsAppMessage(phone, "✋ בוטל.");
+    await safeSend(phone, "✋ בוטל.");
     return true;
   }
 
