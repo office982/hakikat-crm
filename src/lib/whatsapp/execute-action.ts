@@ -6,6 +6,14 @@ import type { AIAgentResponse } from "@/lib/api/claude";
 import { recordCheckAsPayment, dueDateToForMonth } from "@/lib/checks-to-payments";
 import { notifyAction } from "@/lib/notifications";
 
+// Resolves an absolute base URL for server-side loopback fetches. Node's
+// `fetch` rejects relative URLs, so we must always produce an absolute one.
+function getBaseUrl(): string {
+  const explicit = process.env.NEXT_PUBLIC_APP_URL;
+  if (explicit) return explicit.replace(/\/$/, "");
+  return "https://hakikat-crm.onrender.com";
+}
+
 // Maps each WhatsApp action to a short notification title shown in the
 // alerts page. Pure-query actions (balance, report, list) skip the
 // notification — they're not state changes.
@@ -1095,7 +1103,7 @@ async function handleSendContractForSignature(
     entity_name: legalEntity?.name || "",
   });
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+  const baseUrl = getBaseUrl();
   const res = await fetch(`${baseUrl}/api/contracts/${contract.id}/send-for-signature`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1398,7 +1406,7 @@ export async function handleWhatsAppCheckImage(params: {
     return { success: false, message: `📸 ל${tenant.full_name} אין חוזה פעיל — לא ניתן לרשום צ'ק.` };
 
   // Scan the image
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+  const baseUrl = getBaseUrl();
   const scanRes = await fetch(`${baseUrl}/api/checks/scan-from-url`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
