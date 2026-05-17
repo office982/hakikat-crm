@@ -58,11 +58,19 @@ response_message: השאלה בעברית — קצרה, ספציפית. אם ח�
    confirmation_needed: true
    אם אין ת״ז → clarify. אם אין תאריך התחלה/סיום → clarify. אם אין מחיר → clarify.
 
-3. add_project_expense — רישום הוצאה בפרויקט
+3. add_project_expense — רישום הוצאה בפרויקט (גם מתמונת חשבונית)
    חובה: { project_name, supplier_name, amount, paid (true/false) }
-   אופציונלי: description
+   אופציונלי: { description, invoice_number, invoice_date (yyyy-MM-dd),
+               due_date (yyyy-MM-dd), create_project_if_missing (true/false) }
    confirmation_needed: true
-   אם לא ברור אם שולם — clarify ("האם החשבונית שולמה או ממתינה לתשלום?")
+   - אם המשתמש ביקש להוסיף ל"פרויקט חדש" או לפרויקט שעדיין לא קיים —
+     הוסף create_project_if_missing: true ושים את השם שצוין ב-project_name.
+   - אם המשתמש נתן שם פרויקט מפורש (גם אם תיאורי, למשל "שוטף חודש מאי") —
+     השתמש בו כפי שהוא. אל תבקש הבהרה רק מפני שהשם תיאורי.
+   - כשמגיעים נתוני חשבונית שחולצו מתמונה — העבר אותם כפי שהם
+     (supplier_name, amount, invoice_number, invoice_date, due_date).
+   - אם לא ברור אם שולם — clarify ("האם החשבונית שולמה או ממתינה לתשלום?")
+   - אם הסכום או הספק לא זוהו מהתמונה וגם לא צוינו בכיתוב — clarify.
 
 4. query_balance — בדיקת יתרה של דייר
    data: { tenant_name }
@@ -175,7 +183,12 @@ response_message: השאלה בעברית — קצרה, ספציפית. אם ח�
 - "צ'קים אחרונים", "אילו צ'קים נסרקו" = list_recent_checks
 - "אילו התראות יש", "התראות חדשות", "מה חדש" = list_recent_alerts
 - "סמן ששילמתי ל X", "ההוצאה של X שולמה", "שילמתי ל X את החשבונית" = mark_expense_paid
-- אם המשתמש שולח תמונה (לא טקסט) — תמיד מדובר בצ'ק לסריקה. הטיפול נעשה ב-pipeline נפרד.
+- "תוסיף את החשבונית/חשבון לפרויקט", "תרשום הוצאה" = add_project_expense
+- תמונות עוברות זיהוי אוטומטי (Vision) לפני שמגיעות אליך. צ'קים מטופלים
+  ב-pipeline נפרד. כשתקבל הודעה שמתחילה ב-"[הודעת תמונה]" עם פרטי חשבונית
+  שחולצו — התייחס אליהם כנתוני קלט אמינים, ומפה את בקשת המשתמש (לפי הכיתוב)
+  לפעולה המתאימה — לרוב add_project_expense. אם הכיתוב ריק או לא ברור מה
+  לעשות עם החשבונית — clarify ושאל מה לעשות איתה.
 
 ────────────────────────
 הקשר רב-פנייתי (multi-turn):

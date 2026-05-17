@@ -339,11 +339,52 @@ async function handleCreateContract(
   return { success: true, message: msg };
 }
 
+// Accepts an ISO date (YYYY-MM-DD) or returns null. Vision/AI output is
+// untrusted — never let a malformed string reach a DATE column.
+function isoDateOrNull(v: unknown): string | null {
+  const s = String(v || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
 // ─── add_project_expense ─────────────────────────────────────────
 async function handleAddProjectExpense(
   data: Record<string, unknown>
 ): Promise<ActionResult> {
-  const project = await resolveProject(data);
+  let project = await resolveProject(data);
+  let projectCreated = false;
+
+  // "פרויקט חדש" — create it on the fly so an invoice can be filed in a
+  // single confirmed step (the agent sets create_project_if_missing).
+  if (!project && data.create_project_if_missing) {
+    const projectName = String(data.project_name || "").trim();
+    if (!projectName)
+      return { success: false, message: "חסר שם פרויקט." };
+
+    const { data: ents } = await supabase
+      .from("legal_entities")
+      .select("id")
+      .limit(1);
+    const legalEntityId = ents?.[0]?.id;
+    if (!legalEntityId)
+      return { success: false, message: "אין ישות משפטית במערכת." };
+
+    const { data: created, error: createErr } = await supabase
+      .from("projects")
+      .insert({
+        name: projectName,
+        legal_entity_id: legalEntityId,
+        total_budget: 0,
+        status: "active",
+      })
+      .select("id, name")
+      .single();
+    if (createErr) throw createErr;
+
+    project = created;
+    projectCreated = true;
+    await logAction("project", project.id, "project_created", `נפתח פרויקט ${project.name}`, "whatsapp");
+  }
+
   if (!project)
     return { success: false, message: `לא מצאתי פרויקט "${data.project_name}".` };
 
@@ -351,6 +392,11 @@ async function handleAddProjectExpense(
   const amount = Number(data.amount);
   const description = String(data.description || "");
   const status = String(data.paid ? "paid" : "unpaid");
+  const invoiceNumber = data.invoice_number ? String(data.invoice_number) : null;
+  const invoiceImageUrl = data.invoice_image_url ? String(data.invoice_image_url) : null;
+  const invoiceDate =
+    isoDateOrNull(data.invoice_date) || new Date().toISOString().split("T")[0];
+  const dueDate = isoDateOrNull(data.due_date);
 
   if (!amount) return { success: false, message: "חסר סכום — נסה שוב." };
 
@@ -361,7 +407,10 @@ async function handleAddProjectExpense(
       supplier_name: supplierName,
       description,
       amount,
-      invoice_date: new Date().toISOString().split("T")[0],
+      invoice_date: invoiceDate,
+      due_date: dueDate,
+      invoice_number: invoiceNumber,
+      invoice_image_url: invoiceImageUrl,
       status,
       created_by: "whatsapp_agent",
     })
@@ -380,10 +429,15 @@ async function handleAddProjectExpense(
 
   const totalSpent = (expenses || []).reduce((s, e) => s + Number(e.amount), 0);
 
-  let msg = `✅ הוצאה נרשמה בפרויקט ${project.name}:\n`;
+  let msg = projectCreated
+    ? `✅ פרויקט "${project.name}" נוצר וההוצאה נרשמה בו:\n`
+    : `✅ הוצאה נרשמה בפרויקט ${project.name}:\n`;
   msg += `• ספק: ${supplierName}\n`;
   msg += `• סכום: ₪${amount.toLocaleString()}\n`;
+  if (invoiceNumber) msg += `• מספר חשבונית: ${invoiceNumber}\n`;
+  if (dueDate) msg += `• לתשלום עד: ${dueDate}\n`;
   msg += `• סטטוס: ${status === "paid" ? "שולם" : "ממתין לתשלום"}\n`;
+  if (invoiceImageUrl) msg += `• 📎 תמונת החשבונית נשמרה\n`;
   msg += `\nסה"כ הוצאות בפרויקט: ₪${totalSpent.toLocaleString()}`;
 
   return { success: true, message: msg };

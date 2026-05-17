@@ -3,7 +3,9 @@ import { callAIAgent } from "@/lib/api/claude";
 import { sendWhatsAppMessage } from "@/lib/api/wati";
 import { executeAction, issueReceipt, handleWhatsAppCheckImage } from "@/lib/whatsapp/execute-action";
 import { resolveTenant } from "@/lib/whatsapp/resolve-tenant";
+import { scanDocumentImage, type ScannedInvoice } from "@/lib/whatsapp/scan-document";
 import { supabaseAdmin as supabase } from "@/lib/supabase";
+import type { AIAgentResponse } from "@/lib/api/claude";
 
 // Best-effort outbound send — logs but never throws. A WATI/Meta delivery
 // failure on one message must not abort the rest of the webhook flow
@@ -38,7 +40,11 @@ const CONFIRM_NO = ["לא", "ביטול", "בטל", "no", "0", "❌", "x"];
  * WATI Webhook — receives incoming WhatsApp messages.
  *
  * Flow:
- *  1. Image/document → check-scanning pipeline
+ *  1. Image/document → Claude Vision classifies it:
+ *      a. check   → check-scanning pipeline (handleWhatsAppCheckImage)
+ *      b. invoice → extract fields, feed to AI agent with the caption,
+ *                   then the normal confirmation flow
+ *      c. other   → ask the user what to do with it
  *  2. Text "yes/no" while a pending action is open → run/cancel it
  *  3. Otherwise → call AI agent
  *      a. confirmation_needed → store pending_action, ask user
@@ -70,24 +76,69 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // ── Image / document → check scanning flow ──
+    // ── Image / document → classify, then route ──
     if ((payload.type === "image" || payload.type === "document") && payload.data) {
+      const imageUrl = payload.data;
+      const caption = payload.caption || payload.text || "";
       try {
-        const result = await handleWhatsAppCheckImage({
-          phone,
-          imageUrl: payload.data,
-          caption: payload.caption || payload.text || "",
-          senderName: payload.senderName,
-        });
-        await safeSend(phone, result.message);
+        const doc = await scanDocumentImage(imageUrl);
+
+        // Checks keep their dedicated multi-check pipeline (records the
+        // check + payment + auto-issues a receipt).
+        if (doc.doc_type === "check") {
+          const result = await handleWhatsAppCheckImage({
+            phone,
+            imageUrl,
+            caption,
+            senderName: payload.senderName,
+          });
+          await safeSend(phone, result.message);
+          return NextResponse.json({ received: true, action: "image_check" });
+        }
+
+        // Couldn't make sense of the image at all.
+        if (doc.doc_type !== "invoice" || !doc.invoice) {
+          await safeSend(
+            phone,
+            "📸 קיבלתי תמונה אבל לא זיהיתי אם זה צ'ק או חשבונית. אם זה צ'ק — שלח עם כיתוב כמו \"צ'ק של יוסי כהן\". אם זו חשבונית — כתוב מה לעשות איתה (למשל \"תוסיף לפרויקט X\")."
+          );
+          return NextResponse.json({ received: true, action: "image_unknown" });
+        }
+
+        // Invoice → let the AI agent decide the action from the caption +
+        // the extracted fields, then run it through the normal flow.
+        const prompt = buildInvoiceAgentPrompt(doc.invoice, caption);
+        let agentResponse: AIAgentResponse;
+        try {
+          agentResponse = await callAIAgent(prompt);
+        } catch (aiErr) {
+          console.error("AI Agent error (invoice):", aiErr);
+          await safeSend(phone, "⚠️ שגיאה בעיבוד החשבונית — נסה שוב בעוד רגע.");
+          return NextResponse.json({ error: "AI agent failed" }, { status: 500 });
+        }
+
+        // Carry the original media URL + parsed fields into the action so
+        // the expense stores them (survives the pending-action round-trip).
+        agentResponse.data = {
+          ...agentResponse.data,
+          invoice_image_url: imageUrl,
+          invoice_number:
+            agentResponse.data.invoice_number ?? doc.invoice.invoice_number,
+          invoice_date:
+            agentResponse.data.invoice_date ?? doc.invoice.invoice_date,
+          due_date: agentResponse.data.due_date ?? doc.invoice.due_date,
+        };
+
+        await dispatchAgentResponse(phone, payload.senderName, agentResponse);
+        return NextResponse.json({ received: true, action: agentResponse.action });
       } catch (err) {
         console.error("image handling failed:", err);
         await safeSend(
           phone,
-          "⚠️ לא הצלחתי לעבד את התמונה — נסה שוב או שלח שוב עם שם הדייר בכיתוב."
+          "⚠️ לא הצלחתי לעבד את התמונה — נסה שוב, או שלח שוב עם כיתוב שמסביר מה לעשות."
         );
+        return NextResponse.json({ received: true, action: "image_error" });
       }
-      return NextResponse.json({ received: true, action: "image_handled" });
     }
 
     // Only process text messages from here on
@@ -118,35 +169,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "AI agent failed" }, { status: 500 });
     }
 
-    if (agentResponse.confirmation_needed) {
-      const summary =
-        agentResponse.confirmation_message ||
-        agentResponse.response_message ||
-        "האם לאשר את הפעולה?";
-
-      await supabase.from("pending_actions").insert({
-        phone,
-        sender_name: payload.senderName || null,
-        action: agentResponse.action,
-        data: agentResponse.data,
-        confirmation_message: summary,
-        status: "pending",
-      });
-
-      await safeSend(phone, `${summary}\n\nענה: כן / לא`);
-    } else {
-      // Two-message reply for WhatsApp too: acknowledgement first, then the
-      // executor's real result. A failed ack must not block the real result.
-      const ack = agentResponse.response_message?.trim();
-      if (ack && ack.length < 200) {
-        await safeSend(phone, ack);
-      }
-      const result = await executeAction(agentResponse);
-      if (!ack || result.message !== ack) {
-        await safeSend(phone, result.message);
-      }
-    }
-
+    await dispatchAgentResponse(phone, payload.senderName, agentResponse);
     return NextResponse.json({ received: true, action: agentResponse.action });
   } catch (error) {
     console.error("WATI webhook error:", error);
@@ -156,6 +179,84 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+/**
+ * Run an AI agent response through the standard delivery flow:
+ *  - confirmation_needed → store a pending_action and ask "כן / לא"
+ *  - else → ack message first, then the executor's real result
+ * Shared by the text path and the invoice-image path.
+ */
+async function dispatchAgentResponse(
+  phone: string,
+  senderName: string | undefined,
+  agentResponse: AIAgentResponse
+): Promise<void> {
+  if (agentResponse.confirmation_needed) {
+    const summary =
+      agentResponse.confirmation_message ||
+      agentResponse.response_message ||
+      "האם לאשר את הפעולה?";
+
+    await supabase.from("pending_actions").insert({
+      phone,
+      sender_name: senderName || null,
+      action: agentResponse.action,
+      data: agentResponse.data,
+      confirmation_message: summary,
+      status: "pending",
+    });
+
+    await safeSend(phone, `${summary}\n\nענה: כן / לא`);
+    return;
+  }
+
+  // Two-message reply: acknowledgement first, then the executor's real
+  // result. A failed ack must not block the real result.
+  const ack = agentResponse.response_message?.trim();
+  if (ack && ack.length < 200) {
+    await safeSend(phone, ack);
+  }
+  const result = await executeAction(agentResponse);
+  if (!ack || result.message !== ack) {
+    await safeSend(phone, result.message);
+  }
+}
+
+/**
+ * Render the Vision-extracted invoice fields + the user's caption into a
+ * Hebrew message for the AI agent. The agent maps it to an action
+ * (typically add_project_expense) using its normal rules — including the
+ * "never guess, ask to clarify" golden rule when something is missing.
+ */
+function buildInvoiceAgentPrompt(
+  invoice: ScannedInvoice,
+  caption: string
+): string {
+  const f = (label: string, val: string | number | null) =>
+    `• ${label}: ${val !== null && val !== "" ? val : "לא זוהה"}`;
+
+  const captionLine = caption.trim()
+    ? `הכיתוב שצורף לתמונה: "${caption.trim()}"`
+    : "לא צורף כיתוב לתמונה.";
+
+  return [
+    "[הודעת תמונה] המשתמש שלח תמונת חשבונית/חשבון ספק בוואטסאפ.",
+    captionLine,
+    "",
+    "פרטים שחולצו אוטומטית מהחשבונית (נתוני קלט אמינים):",
+    f("ספק", invoice.supplier_name),
+    f("סכום", invoice.amount),
+    f("מספר חשבונית", invoice.invoice_number),
+    f("תאריך חשבונית", invoice.invoice_date),
+    f("תאריך לתשלום", invoice.due_date),
+    f("תיאור", invoice.description),
+    "",
+    "בצע את מבוקש המשתמש לפי הכיתוב. אם הכיתוב מבקש להוסיף לפרויקט שעדיין",
+    "לא קיים (\"פרויקט חדש\") — השתמש ב-add_project_expense עם",
+    "create_project_if_missing: true ושם הפרויקט שצוין. אם פרט חובה לא",
+    "זוהה מהתמונה וגם לא צוין בכיתוב — clarify.",
+  ].join("\n");
 }
 
 /**
