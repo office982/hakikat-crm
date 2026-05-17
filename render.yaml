@@ -69,6 +69,13 @@ services:
         sync: false
       - key: NEXT_PUBLIC_ONEDRIVE_CLIENT_ID
         sync: false
+      # OAuth authority for the browser sign-in flow. The shared Azure app
+      # registration is "personal Microsoft accounts only", so this MUST be
+      # `consumers` (a tenant GUID / `common` triggers AADSTS9002346).
+      # NEXT_PUBLIC_* is inlined at build time, so set an explicit value
+      # here rather than sync:false.
+      - key: NEXT_PUBLIC_ONEDRIVE_TENANT_ID
+        value: consumers
       # Server-side OneDrive backup (refresh-token flow). Leave unset to
       # keep the OneDrive backup job a no-op; flip onedrive_backup_enabled
       # in settings once these are provisioned.
@@ -78,8 +85,9 @@ services:
         sync: false
       - key: ONEDRIVE_REFRESH_TOKEN
         sync: false
+      # Same constraint as above — keep `consumers` for the personal-account app.
       - key: ONEDRIVE_TENANT_ID
-        sync: false
+        value: consumers
       - key: ONEDRIVE_BACKUP_FOLDER_NAME
         sync: false
       - key: CRON_SECRET
