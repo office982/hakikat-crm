@@ -16,9 +16,11 @@ const GRAPH = "https://graph.microsoft.com/v1.0";
 const SCOPES = "Files.ReadWrite offline_access";
 
 // Fallbacks for the shared Hakikat Azure AD app registration. Env vars
-// still win — these only kick in when nothing is provisioned.
+// still win — these only kick in when nothing is provisioned. The app
+// registration is "personal Microsoft accounts only", so the authority
+// must be `consumers` (a tenant GUID / `common` triggers AADSTS9002346).
 const DEFAULT_CLIENT_ID = "2a6a5e5e-04aa-4735-99d1-feecac3ee52a";
-const DEFAULT_TENANT_ID = "3a56e4e1-d64d-4c4c-a595-9245f7c53a8c";
+const DEFAULT_TENANT_ID = "consumers";
 
 let cached: { token: string; expiresAt: number } | null = null;
 

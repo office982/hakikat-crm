@@ -6,8 +6,11 @@ const SCOPES = "Files.ReadWrite User.Read offline_access";
 
 // Fallbacks for the shared Hakikat Azure AD app registration. Env vars
 // still win — these only kick in when nothing is provisioned at build time.
+// The app registration is "personal Microsoft accounts only", so the
+// authority must be `consumers`. A tenant GUID / `common` triggers
+// AADSTS9002346 ("configured for use by Microsoft Account users only").
 const DEFAULT_CLIENT_ID = "2a6a5e5e-04aa-4735-99d1-feecac3ee52a";
-const DEFAULT_TENANT_ID = "3a56e4e1-d64d-4c4c-a595-9245f7c53a8c";
+const DEFAULT_TENANT_ID = "consumers";
 
 function getClientId() {
   return process.env.NEXT_PUBLIC_ONEDRIVE_CLIENT_ID || DEFAULT_CLIENT_ID;
