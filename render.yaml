@@ -67,27 +67,14 @@ services:
         sync: false
       - key: ADMIN_WHATSAPP_PHONE
         sync: false
-      - key: NEXT_PUBLIC_ONEDRIVE_CLIENT_ID
-        sync: false
-      # OAuth authority for the browser sign-in flow. The shared Azure app
-      # registration is "personal Microsoft accounts only", so this MUST be
-      # `consumers` (a tenant GUID / `common` triggers AADSTS9002346).
-      # NEXT_PUBLIC_* is inlined at build time, so set an explicit value
-      # here rather than sync:false.
-      - key: NEXT_PUBLIC_ONEDRIVE_TENANT_ID
-        value: consumers
+      # OneDrive client ID / tenant are hardcoded in src/lib/api/onedrive*.ts
+      # for the "hakikat-crm-onedrive" Azure app registration (multitenant +
+      # personal accounts, authority `common`). No env vars required.
       # Server-side OneDrive backup (refresh-token flow). Leave unset to
       # keep the OneDrive backup job a no-op; flip onedrive_backup_enabled
-      # in settings once these are provisioned.
-      - key: ONEDRIVE_CLIENT_ID
-        sync: false
-      - key: ONEDRIVE_CLIENT_SECRET
-        sync: false
+      # in settings once a refresh token is provisioned.
       - key: ONEDRIVE_REFRESH_TOKEN
         sync: false
-      # Same constraint as above — keep `consumers` for the personal-account app.
-      - key: ONEDRIVE_TENANT_ID
-        value: consumers
       - key: ONEDRIVE_BACKUP_FOLDER_NAME
         sync: false
       - key: CRON_SECRET

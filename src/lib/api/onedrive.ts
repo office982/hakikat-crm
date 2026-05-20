@@ -4,22 +4,12 @@
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 const SCOPES = "Files.ReadWrite User.Read offline_access";
 
-// Fallbacks for the shared Hakikat Azure AD app registration. Env vars
-// still win — these only kick in when nothing is provisioned at build time.
-// The app registration is "personal Microsoft accounts only", so the
-// authority must be `consumers`. A tenant GUID / `common` triggers
-// AADSTS9002346 ("configured for use by Microsoft Account users only").
-const DEFAULT_CLIENT_ID = "2a6a5e5e-04aa-4735-99d1-feecac3ee52a";
-const DEFAULT_TENANT_ID = "consumers";
-
-function getClientId() {
-  return process.env.NEXT_PUBLIC_ONEDRIVE_CLIENT_ID || DEFAULT_CLIENT_ID;
-}
-
-function getAuthBase() {
-  const tenant = process.env.NEXT_PUBLIC_ONEDRIVE_TENANT_ID || DEFAULT_TENANT_ID;
-  return `https://login.microsoftonline.com/${tenant}/oauth2/v2.0`;
-}
+// Hakikat Azure AD app registration ("hakikat-crm-onedrive"). Multitenant +
+// personal accounts, so authority is `common` (accepts both personal MSAs
+// and work/school accounts). Hardcoded — no env vars / .env files needed.
+const CLIENT_ID = "614f034d-9ed3-4135-9a03-22eb9d6be9c8";
+const TENANT_ID = "common";
+const AUTH_BASE = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0`;
 
 // ── PKCE helpers ─────────────────────────────────────────────────────────────
 function randomString(n: number) {
