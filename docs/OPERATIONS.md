@@ -78,8 +78,9 @@
 
 | Variable | תיאור |
 |----------|-------|
-| `EASYDO_API_KEY` | מפתח EasyDo |
-| `EASYDO_WEBHOOK_SECRET` | סוד לאימות webhooks של אירועי חתימה |
+| `EASYDO_CLIENT_ID` | Client ID מ-EasyDo (Settings → API Settings → Add API Client) |
+| `EASYDO_CLIENT_SECRET` | Client Secret מ-EasyDo (לא ניתן לצפייה לאחר יצירה — שמור מיד) |
+| `EASYDO_WEBHOOK_SECRET` | סוד לאימות webhooks של אירועי חתימה (מוגדר ב-EasyDo dashboard עם רישום ה-webhook) |
 
 ### Google Drive (גיבויים + חוזים)
 

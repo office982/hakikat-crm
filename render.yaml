@@ -63,7 +63,13 @@ services:
         sync: false
       - key: WATI_WEBHOOK_TOKEN
         sync: false
-      - key: EASYDO_API_KEY
+      # EasyDo digital signature — OAuth client-credentials flow.
+      # Obtain from EasyDo dashboard → Settings → API Settings → Add API Client.
+      - key: EASYDO_CLIENT_ID
+        sync: false
+      - key: EASYDO_CLIENT_SECRET
+        sync: false
+      - key: EASYDO_WEBHOOK_SECRET
         sync: false
       - key: ADMIN_WHATSAPP_PHONE
         sync: false

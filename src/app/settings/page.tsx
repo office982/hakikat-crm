@@ -82,7 +82,7 @@ function IntegrationsSection() {
     { name: "WATI (WhatsApp)", fields: ["API Key", "Base URL", "מספר WhatsApp"], env: ["WATI_API_KEY", "WATI_BASE_URL"] },
     { name: "iCount (חשבוניות)", fields: ["API Key", "Company ID"], env: ["ICOUNT_COMPANY_ID"] },
     { name: "Google Drive", fields: ["Client ID", "Client Secret", "תיקיית בסיס"], env: ["GOOGLE_CLIENT_ID"] },
-    { name: "EasyDo (חתימות)", fields: ["API Key"], env: ["EASYDO_API_KEY"] },
+    { name: "EasyDo (חתימות)", fields: ["Client ID", "Client Secret"], env: ["EASYDO_CLIENT_ID", "EASYDO_CLIENT_SECRET"] },
     { name: "Claude API", fields: ["API Key"], env: ["ANTHROPIC_API_KEY"] },
   ];
 
