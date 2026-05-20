@@ -5,8 +5,11 @@ import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
+import { Cloud } from "lucide-react";
 import { useUpdateContract } from "@/hooks/useContracts";
+import { createTenantFolder, uploadAndShare } from "@/lib/api/onedrive";
 import type { Contract } from "@/types/database";
+import { CloudDestinationModal, type CloudDestination } from "./CloudDestinationModal";
 
 interface Props {
   isOpen: boolean;
@@ -55,6 +58,9 @@ export function ContractEditModal({ isOpen, onClose, contract }: Props) {
     google_drive_url: "",
   });
   const [error, setError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupNotice, setBackupNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (contract) {
@@ -73,6 +79,60 @@ export function ContractEditModal({ isOpen, onClose, contract }: Props) {
     }
     setError(null);
   }, [contract, isOpen]);
+
+  const runBackup = async (destination: CloudDestination) => {
+    if (!contract) return;
+    setPickerOpen(false);
+    setBackupBusy(true);
+    setBackupNotice(null);
+    setError(null);
+    try {
+      // First call: server uploads (Google Drive) or returns render data (OneDrive).
+      const r1 = await fetch(`/api/contracts/${contract.id}/backup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ destination }),
+      });
+      const j1 = await r1.json();
+      if (!r1.ok) throw new Error(j1.error || "גיבוי נכשל");
+
+      let savedUrl: string = j1.url ?? "";
+
+      if (j1.needs_upload) {
+        // OneDrive: upload client-side, then call back to persist the URL.
+        const { html, file_name, tenant_name } = j1.render as {
+          html: string;
+          file_name: string;
+          tenant_name: string;
+        };
+        const folder = await createTenantFolder(tenant_name);
+        const { url } = await uploadAndShare(
+          folder.id,
+          file_name,
+          new Blob([html], { type: "text/html" })
+        );
+        const r2 = await fetch(`/api/contracts/${contract.id}/backup`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ destination, uploaded_url: url }),
+        });
+        const j2 = await r2.json();
+        if (!r2.ok) throw new Error(j2.error || "שמירת קישור הגיבוי נכשלה");
+        savedUrl = j2.url;
+      }
+
+      setForm((f) => ({ ...f, google_drive_url: savedUrl }));
+      setBackupNotice(
+        destination === "google_drive"
+          ? "נשמר עותק ב-Google Drive"
+          : "נשמר עותק ב-OneDrive"
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "גיבוי נכשל");
+    } finally {
+      setBackupBusy(false);
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,13 +229,26 @@ export function ContractEditModal({ isOpen, onClose, contract }: Props) {
           onChange={(e) => setForm({ ...form, status: e.target.value as ContractEditForm["status"] })}
           options={STATUS_OPTIONS}
         />
-        <Input
-          label="קישור Google Drive"
-          value={form.google_drive_url}
-          onChange={(e) => setForm({ ...form, google_drive_url: e.target.value })}
-          placeholder="https://drive.google.com/..."
-          dir="ltr"
-        />
+        <div className="space-y-2">
+          <Input
+            label="קישור גיבוי בענן"
+            value={form.google_drive_url}
+            onChange={(e) => setForm({ ...form, google_drive_url: e.target.value })}
+            placeholder="https://..."
+            dir="ltr"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setPickerOpen(true)}
+            isLoading={backupBusy}
+          >
+            <Cloud className="w-4 h-4" />
+            שמור עותק לענן
+          </Button>
+          {backupNotice && <p className="text-sm text-success">{backupNotice}</p>}
+        </div>
         {error && <p className="text-sm text-danger">{error}</p>}
         <div className="flex justify-end gap-3 pt-2">
           <Button type="button" variant="outline" onClick={onClose}>
@@ -186,6 +259,13 @@ export function ContractEditModal({ isOpen, onClose, contract }: Props) {
           </Button>
         </div>
       </form>
+      <CloudDestinationModal
+        isOpen={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onConfirm={runBackup}
+        title="שמור עותק לענן"
+        confirmLabel="שמור"
+      />
     </Modal>
   );
 }

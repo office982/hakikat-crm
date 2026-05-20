@@ -36,6 +36,29 @@ function saveToken(data: { access_token: string; expires_in: number; refresh_tok
   if (data.refresh_token) localStorage.setItem("od_refresh", data.refresh_token);
 }
 
+/**
+ * Fetch the signed-in user's email/UPN from Graph and cache it locally,
+ * so the UI can show "Saving to ariel@example.com" without an extra
+ * Graph round-trip every render.
+ */
+async function refreshCachedAccount(): Promise<void> {
+  try {
+    const me = await graphGet("/me?$select=mail,userPrincipalName,displayName");
+    const email = me.mail || me.userPrincipalName || "";
+    if (email) localStorage.setItem("od_account", email);
+    if (me.displayName) localStorage.setItem("od_account_name", me.displayName);
+  } catch {
+    // Non-fatal — UI will fall back to "OneDrive account" if missing.
+  }
+}
+
+export function getSignedInAccount(): { email: string; name: string } | null {
+  if (typeof window === "undefined") return null;
+  const email = localStorage.getItem("od_account");
+  if (!email) return null;
+  return { email, name: localStorage.getItem("od_account_name") || email };
+}
+
 async function fetchToken(body: Record<string, string>) {
   const res = await fetch(`${AUTH_BASE}/token`, {
     method: "POST",
@@ -47,7 +70,7 @@ async function fetchToken(body: Record<string, string>) {
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
-export async function signIn(): Promise<void> {
+export async function signIn(options?: { forceAccountPicker?: boolean }): Promise<void> {
   const { verifier, challenge } = await pkce();
   const state = randomString(32);
   const redirectUri = `${window.location.origin}/auth`;
@@ -64,6 +87,9 @@ export async function signIn(): Promise<void> {
     code_challenge_method: "S256",
     state,
   });
+  // prompt=select_account makes Microsoft show the account picker even
+  // when the user is already signed in — required for "switch account".
+  if (options?.forceAccountPicker) params.set("prompt", "select_account");
 
   const popup = window.open(
     `${AUTH_BASE}/authorize?${params}`,
@@ -88,6 +114,7 @@ export async function signIn(): Promise<void> {
           code_verifier: verifier,
         });
         saveToken(data);
+        await refreshCachedAccount();
         resolve();
       } catch (e) {
         reject(e);
@@ -105,10 +132,18 @@ export async function signIn(): Promise<void> {
   });
 }
 
+/** Convenience: drop the current token and re-prompt with the account picker. */
+export async function switchAccount(): Promise<void> {
+  signOut();
+  await signIn({ forceAccountPicker: true });
+}
+
 export function signOut(): void {
   localStorage.removeItem("od_token");
   localStorage.removeItem("od_expiry");
   localStorage.removeItem("od_refresh");
+  localStorage.removeItem("od_account");
+  localStorage.removeItem("od_account_name");
 }
 
 export function isSignedIn(): boolean {

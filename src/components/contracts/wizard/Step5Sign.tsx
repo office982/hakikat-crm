@@ -4,32 +4,29 @@ import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { Send, CheckCircle, Clock, FileText, AlertCircle, Cloud, HardDrive } from "lucide-react";
+import { Send, CheckCircle, Clock, FileText, AlertCircle } from "lucide-react";
 import type { ContractFormData } from "../ContractWizard";
 import { renderContractHtml } from "@/lib/contract-render";
-import {
-  isSignedIn as isOneDriveSignedIn,
-  signIn as oneDriveSignIn,
-  createTenantFolder,
-  uploadAndShare,
-} from "@/lib/api/onedrive";
+import { createTenantFolder, uploadAndShare } from "@/lib/api/onedrive";
+import { CloudDestinationModal, type CloudDestination } from "../CloudDestinationModal";
 
 interface Props {
   data: ContractFormData;
   onChange: (partial: Partial<ContractFormData>) => void;
 }
 
-type Destination = "google_drive" | "onedrive";
-
 export function Step5Sign({ data, onChange }: Props) {
   const [step, setStep] = useState<"idle" | "creating" | "uploading" | "sending" | "done" | "error">(
     data.contract_id ? (data.signing_status === "sent" ? "done" : "idle") : "idle"
   );
   const [error, setError] = useState("");
-  const [destination, setDestination] = useState<Destination>("google_drive");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [lastDestination, setLastDestination] = useState<CloudDestination | null>(null);
 
-  const handleSendForSignature = async () => {
+  const runFlow = async (destination: CloudDestination) => {
     setError("");
+    setPickerOpen(false);
+    setLastDestination(destination);
     try {
       // 1. Create the contract record (if not already created)
       let contractId = data.contract_id;
@@ -65,13 +62,11 @@ export function Step5Sign({ data, onChange }: Props) {
         onChange({ contract_id: contractId, tenant_id: createJson.tenant_id });
       }
 
-      // 2. If destination = OneDrive, upload client-side and pass URL
+      // 2. If destination = OneDrive, upload archive copy client-side.
+      // Google Drive archiving is handled server-side (single configured account).
       let uploadedUrl: string | undefined;
       if (destination === "onedrive") {
         setStep("uploading");
-        if (!isOneDriveSignedIn()) {
-          await oneDriveSignIn();
-        }
         const html = renderContractHtml({
           title: `חוזה שכירות — ${data.full_name}`,
           body: data.contract_text,
@@ -85,7 +80,7 @@ export function Step5Sign({ data, onChange }: Props) {
         uploadedUrl = url;
       }
 
-      // 3. Send to EasyDo
+      // 3. Send to EasyDo (server renders PDF + uploads it; ignores uploaded_url)
       setStep("sending");
       const sendRes = await fetch(`/api/contracts/${contractId}/send-for-signature`, {
         method: "POST",
@@ -140,42 +135,6 @@ export function Step5Sign({ data, onChange }: Props) {
             </ul>
           </div>
 
-          {/* Destination selector */}
-          {data.signing_status === "pending" && (
-            <div className="border-t border-border pt-4">
-              <p className="text-sm font-medium mb-2">יעד אחסון לחוזה:</p>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setDestination("google_drive")}
-                  className={`flex items-center gap-2 p-3 rounded-lg border text-sm transition-colors ${
-                    destination === "google_drive"
-                      ? "border-primary bg-primary/5 text-primary"
-                      : "border-border hover:bg-gray-50"
-                  }`}
-                >
-                  <HardDrive className="w-4 h-4" />
-                  Google Drive
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDestination("onedrive")}
-                  className={`flex items-center gap-2 p-3 rounded-lg border text-sm transition-colors ${
-                    destination === "onedrive"
-                      ? "border-primary bg-primary/5 text-primary"
-                      : "border-border hover:bg-gray-50"
-                  }`}
-                >
-                  <Cloud className="w-4 h-4" />
-                  OneDrive
-                </button>
-              </div>
-              {destination === "onedrive" && !isOneDriveSignedIn() && (
-                <p className="text-xs text-warning mt-2">⚠ תידרש להתחבר ל-OneDrive בלחיצה על השליחה.</p>
-              )}
-            </div>
-          )}
-
           {/* Status indicator */}
           <div className="border-t border-border pt-4">
             <div className="flex items-center gap-2 mb-4">
@@ -226,7 +185,7 @@ export function Step5Sign({ data, onChange }: Props) {
                 </div>
                 <ul className="text-muted space-y-1 mt-2">
                   <li>✓ תיק דייר נפתח אוטומטית</li>
-                  <li>✓ PDF נשמר ב-{destination === "onedrive" ? "OneDrive" : "Google Drive"}</li>
+                  <li>✓ PDF נשמר ב-{lastDestination === "onedrive" ? "OneDrive" : "Google Drive"}</li>
                   <li>✓ לוח תשלומים נוצר</li>
                   <li>✓ יחידה סומנה כמאוכלסת</li>
                 </ul>
@@ -243,7 +202,7 @@ export function Step5Sign({ data, onChange }: Props) {
 
           {data.signing_status === "pending" && (
             <Button
-              onClick={handleSendForSignature}
+              onClick={() => setPickerOpen(true)}
               isLoading={isWorking}
               className="w-full"
               size="lg"
@@ -254,6 +213,14 @@ export function Step5Sign({ data, onChange }: Props) {
           )}
         </div>
       </Card>
+
+      <CloudDestinationModal
+        isOpen={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onConfirm={runFlow}
+        title="בחירת יעד אחסון לחוזה"
+        confirmLabel="שלח לחתימה"
+      />
     </div>
   );
 }
