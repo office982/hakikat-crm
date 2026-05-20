@@ -7,27 +7,18 @@
 //
 // Required env:
 //   ONEDRIVE_REFRESH_TOKEN   — refresh token issued with `offline_access`
-// Optional env (have built-in fallbacks to the shared Hakikat app registration):
-//   ONEDRIVE_CLIENT_ID       — Microsoft app (public or confidential) client id
-//   ONEDRIVE_TENANT_ID       — `consumers`, `common`, or a tenant guid
-//   ONEDRIVE_CLIENT_SECRET   — only for confidential clients
+//                              (the only thing not hardcoded; it's a secret)
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const SCOPES = "Files.ReadWrite offline_access";
 
-// Fallbacks for the Hakikat Azure AD app registration ("hakikat-crm-onedrive").
-// Env vars still win — these only kick in when nothing is provisioned. The
-// app is registered as multitenant + personal accounts, so authority is
-// `common` (accepts both personal MSAs and work/school accounts).
-const DEFAULT_CLIENT_ID = "614f034d-9ed3-4135-9a03-22eb9d6be9c8";
-const DEFAULT_TENANT_ID = "common";
+// Hakikat Azure AD app registration ("hakikat-crm-onedrive"). Multitenant +
+// personal accounts, so authority is `common`. Hardcoded — no env vars.
+const CLIENT_ID = "614f034d-9ed3-4135-9a03-22eb9d6be9c8";
+const TENANT_ID = "common";
+const TOKEN_URL = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
 
 let cached: { token: string; expiresAt: number } | null = null;
-
-function tokenUrl(): string {
-  const tenant = process.env.ONEDRIVE_TENANT_ID || DEFAULT_TENANT_ID;
-  return `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
-}
 
 export function isOneDriveServerConfigured(): boolean {
   return !!process.env.ONEDRIVE_REFRESH_TOKEN;
@@ -36,23 +27,19 @@ export function isOneDriveServerConfigured(): boolean {
 async function getAccessToken(): Promise<string> {
   if (cached && Date.now() < cached.expiresAt - 60_000) return cached.token;
 
-  const clientId = process.env.ONEDRIVE_CLIENT_ID || DEFAULT_CLIENT_ID;
   const refresh = process.env.ONEDRIVE_REFRESH_TOKEN;
   if (!refresh) {
     throw new Error("OneDrive server not configured (ONEDRIVE_REFRESH_TOKEN required)");
   }
 
   const body = new URLSearchParams({
-    client_id: clientId,
+    client_id: CLIENT_ID,
     grant_type: "refresh_token",
     refresh_token: refresh,
     scope: SCOPES,
   });
-  if (process.env.ONEDRIVE_CLIENT_SECRET) {
-    body.set("client_secret", process.env.ONEDRIVE_CLIENT_SECRET);
-  }
 
-  const res = await fetch(tokenUrl(), {
+  const res = await fetch(TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,

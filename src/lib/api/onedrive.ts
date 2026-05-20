@@ -37,7 +37,7 @@ function saveToken(data: { access_token: string; expires_in: number; refresh_tok
 }
 
 async function fetchToken(body: Record<string, string>) {
-  const res = await fetch(`${getAuthBase()}/token`, {
+  const res = await fetch(`${AUTH_BASE}/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams(body),
@@ -48,9 +48,6 @@ async function fetchToken(body: Record<string, string>) {
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 export async function signIn(): Promise<void> {
-  const clientId = getClientId();
-  if (!clientId) throw new Error("OneDrive Client ID not configured");
-
   const { verifier, challenge } = await pkce();
   const state = randomString(32);
   const redirectUri = `${window.location.origin}/auth`;
@@ -59,7 +56,7 @@ export async function signIn(): Promise<void> {
   sessionStorage.setItem("od_state", state);
 
   const params = new URLSearchParams({
-    client_id: clientId,
+    client_id: CLIENT_ID,
     response_type: "code",
     redirect_uri: redirectUri,
     scope: SCOPES,
@@ -69,7 +66,7 @@ export async function signIn(): Promise<void> {
   });
 
   const popup = window.open(
-    `${getAuthBase()}/authorize?${params}`,
+    `${AUTH_BASE}/authorize?${params}`,
     "ms_oauth",
     "width=520,height=680,scrollbars=yes"
   );
@@ -84,7 +81,7 @@ export async function signIn(): Promise<void> {
       if (event.data.state !== state) return reject(new Error("State mismatch"));
       try {
         const data = await fetchToken({
-          client_id: clientId,
+          client_id: CLIENT_ID,
           grant_type: "authorization_code",
           code: event.data.code,
           redirect_uri: redirectUri,
@@ -128,7 +125,7 @@ async function getToken(): Promise<string> {
   const refresh = localStorage.getItem("od_refresh");
   if (refresh) {
     const data = await fetchToken({
-      client_id: getClientId(),
+      client_id: CLIENT_ID,
       grant_type: "refresh_token",
       refresh_token: refresh,
       scope: SCOPES,
