@@ -20,8 +20,8 @@ export async function POST(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const { id: contractId } = await context.params;
   try {
-    const { id: contractId } = await context.params;
     const body: SendBody = await request.json();
 
     if (!body.contract_text) {
