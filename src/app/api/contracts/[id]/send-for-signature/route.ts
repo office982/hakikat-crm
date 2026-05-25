@@ -123,9 +123,14 @@ export async function POST(
 
     return NextResponse.json({ document_id: easydo.document_id, signature_sent: true });
   } catch (err) {
-    console.error("send-for-signature failed:", err);
+    const { id: contractId } = await context.params.catch(() => ({ id: "?" }));
+    console.error("send-for-signature failed", {
+      contractId,
+      message: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
     return NextResponse.json(
-      { error: "שליחה לחתימה נכשלה", details: String(err) },
+      { error: "שליחה לחתימה נכשלה", details: err instanceof Error ? err.message : String(err) },
       { status: 500 }
     );
   }
