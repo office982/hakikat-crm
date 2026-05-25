@@ -166,7 +166,7 @@ export function Step5Sign({ data, onChange }: Props) {
                   <Clock className="w-4 h-4 text-warning" />
                   <span className="font-medium">ממתין לחתימת הדייר</span>
                 </div>
-                <p className="text-muted">הודעת WhatsApp נשלחה לדייר עם קישור לחתימה.</p>
+                <p className="text-muted"> מייל נשלח לדייר עם קישור לחתימה.</p>
                 {data.contract_pdf_url && (
                   <p className="mt-2">
                     <a href={data.contract_pdf_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
