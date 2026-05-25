@@ -115,9 +115,20 @@ async function getToken(): Promise<string> {
   return data.access_token;
 }
 
-async function easydoFetch(path: string, body: unknown): Promise<unknown> {
+// For PDF uploads we don't want to dump a multi-MB base64 string into logs.
+// `redactedBody` lets the caller pass a sanitized version of the request body
+// (e.g. base64 replaced with "<N bytes>") just for the log line.
+async function easydoFetch(
+  path: string,
+  body: unknown,
+  opts?: { redactedBody?: unknown }
+): Promise<unknown> {
   const token = await getToken();
   const url = `${API_BASE}${path}`;
+  console.log("[easydo] -> request", {
+    url,
+    body: opts?.redactedBody ?? body,
+  });
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -127,15 +138,20 @@ async function easydoFetch(path: string, body: unknown): Promise<unknown> {
     },
     body: JSON.stringify(body),
   });
+  const rawBody = await res.text();
   if (!res.ok) {
-    const errBody = await res.text();
-    console.error("[easydo] api call failed", { url, status: res.status, body: errBody });
+    console.error("[easydo] api call failed", { url, status: res.status, body: rawBody });
     // If the cached token was revoked mid-flight, drop it so the next call
     // re-authenticates instead of looping on a dead token.
     if (res.status === 401 || res.status === 403) tokenCache = null;
-    throw new Error(`EasyDo ${path} -> ${res.status}: ${errBody}`);
+    throw new Error(`EasyDo ${path} -> ${res.status}: ${rawBody}`);
   }
-  return res.json();
+  console.log("[easydo] <- response", { url, status: res.status, body: rawBody });
+  try {
+    return JSON.parse(rawBody);
+  } catch {
+    return rawBody;
+  }
 }
 
 export interface EasydoSigner {
@@ -196,10 +212,15 @@ export async function sendForSignature(args: {
   console.log("[easydo] step 2/3 assignees set", { formId, count: assignees.length });
 
   // 3. Upload PDF (base64)
-  await easydoFetch(`/api/entity/me/forms/${formId}/upload`, {
+  const uploadBody = {
     file: {
       name: args.file_name || "contract.pdf",
       data: args.pdf.toString("base64"),
+    },
+  };
+  await easydoFetch(`/api/entity/me/forms/${formId}/upload`, uploadBody, {
+    redactedBody: {
+      file: { name: uploadBody.file.name, data: `<${args.pdf.length} bytes base64>` },
     },
   });
   console.log("[easydo] step 3/3 pdf uploaded", { formId });
