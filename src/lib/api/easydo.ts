@@ -180,11 +180,16 @@ export async function sendForSignature(args: {
   }
   console.log("[easydo] step 1/3 form created", { formId });
 
-  // 2. Set recipients (temporary/random — by email; SMS requires a registered profile)
+  // 2. Set recipients (temporary/random — by email).
+  // `notify_platform: "email"` is required for EasyDo to actually dispatch the
+  // signature link; without it the form is staged but no email is sent.
+  // `role_id: "1"` matches the single-recipient case in EasyDo's docs.
   const assignees = args.signers.map((s, i) => ({
     email: s.email,
     name: s.name,
+    role_id: "1",
     sequence: i + 1,
+    notify_platform: "email",
     recipient: true,
   }));
   await easydoFetch(`/api/entity/me/forms/${formId}/assignees`, { assignees });
