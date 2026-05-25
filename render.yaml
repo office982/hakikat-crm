@@ -2,11 +2,16 @@ services:
   - type: web
     name: hakikat-crm
     runtime: node
-    buildCommand: npm install && npm run build
+    buildCommand: npm install && npx puppeteer browsers install chrome && npm run build
     startCommand: npm run start
     envVars:
       - key: NODE_VERSION
         value: "20"
+      # Puppeteer downloads Chrome to ~/.cache/puppeteer by default, but on
+      # Render that path is wiped between build and runtime. Pin the cache
+      # under the project root so the bundled Chrome survives into runtime.
+      - key: PUPPETEER_CACHE_DIR
+        value: /opt/render/project/src/.puppeteer-cache
       - key: DATABASE_URL
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_URL
