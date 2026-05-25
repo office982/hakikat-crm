@@ -66,9 +66,13 @@ async function getToken(): Promise<string> {
   try {
     res = await fetch(authUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      // EasyDo's auth body uses hyphenated keys, not snake/camelCase.
-      body: JSON.stringify({ "client-id": clientId, "client-secret": clientSecret }),
+      // EasyDo expects credentials as request headers, not in the body.
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "client-id": clientId,
+        "client-secret": clientSecret,
+      },
     });
   } catch (e) {
     console.error("[easydo] token request network error", e);
