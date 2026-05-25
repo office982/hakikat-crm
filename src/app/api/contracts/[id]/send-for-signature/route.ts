@@ -123,7 +123,6 @@ export async function POST(
 
     return NextResponse.json({ document_id: easydo.document_id, signature_sent: true });
   } catch (err) {
-    const { id: contractId } = await context.params.catch(() => ({ id: "?" }));
     console.error("send-for-signature failed", {
       contractId,
       message: err instanceof Error ? err.message : String(err),
