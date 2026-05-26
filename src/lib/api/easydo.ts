@@ -218,6 +218,7 @@ export async function sendForSignature(args: {
 
   // 3. Upload PDF (base64). `mime: "application/pdf"` tells EasyDo to treat
   // it as a PDF form (vs. a generic attachment) so the PDF interpreter runs.
+  // The response's payload.data keys are the bg image URLs we need in step 4.
   const uploadBody = {
     file: {
       name: args.file_name || "contract.pdf",
@@ -225,27 +226,62 @@ export async function sendForSignature(args: {
       mime: "application/pdf",
     },
   };
-  await easydoFetch(`/api/entity/me/forms/${formId}/upload`, uploadBody, {
-    redactedBody: {
-      file: {
-        name: uploadBody.file.name,
-        data: `<${args.pdf.length} bytes base64>`,
-        mime: uploadBody.file.mime,
+  const uploaded = (await easydoFetch(
+    `/api/entity/me/forms/${formId}/upload`,
+    uploadBody,
+    {
+      redactedBody: {
+        file: {
+          name: uploadBody.file.name,
+          data: `<${args.pdf.length} bytes base64>`,
+          mime: uploadBody.file.mime,
+        },
       },
-    },
-  });
+    }
+  )) as { payload?: { data?: Record<string, unknown> } };
   console.log("[easydo] step 3/4 pdf uploaded", { formId });
 
-  // 4. Dispatch the form. Without this PUT the form sits at
-  // status="incomplete" and never appears in the EasyDo dashboard.
-  // `draft: false` is the actual dispatch trigger — it flips the form
-  // out of the draft-forms list and into the sender's main view.
+  // Extract the bg image URLs EasyDo generated from the PDF (one per page),
+  // sorted by page number. The PUT in step 4 must echo these exact keys.
+  const bgUrls = Object.keys(uploaded.payload?.data ?? {}).sort((a, b) => {
+    const pageNum = (u: string) =>
+      parseInt(u.match(/\/bg\/(\d+)\.[a-z]+$/i)?.[1] ?? "0", 10);
+    return pageNum(a) - pageNum(b);
+  });
+  if (bgUrls.length === 0) {
+    throw new Error(`EasyDo upload returned no page bg images for form ${formId}`);
+  }
+
+  // 4. Place a signature field on the last page and dispatch the form.
+  // Without at least one signable field, EasyDo keeps the form at
+  // status="incomplete" and hides it from the sender's dashboard.
+  // Coordinates are 0–1 relative to the page; field goes bottom-center.
+  const signatureField = {
+    pos_x: 0.35,
+    pos_y: 0.85,
+    width: 0.3,
+    height: 0.08,
+    name: null,
+    placeholder: null,
+    font: "Arial",
+    font_size: "16",
+    type: "input-signature",
+    role_id: "1",
+  };
+  const fieldsByPage: Record<string, object[]> = {};
+  for (const url of bgUrls) fieldsByPage[url] = [];
+  fieldsByPage[bgUrls[bgUrls.length - 1]] = [signatureField];
+
   await easydoFetch(
     `/api/entity/me/forms/${formId}`,
-    { draft: false },
+    { draft: false, data: fieldsByPage },
     { method: "PUT" }
   );
-  console.log("[easydo] step 4/4 form dispatched", { formId });
+  console.log("[easydo] step 4/4 form dispatched", {
+    formId,
+    pages: bgUrls.length,
+    sig_on_page: bgUrls.length,
+  });
 
   return { document_id: formId };
 }
