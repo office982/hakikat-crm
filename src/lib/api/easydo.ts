@@ -1,10 +1,13 @@
 // EasyDo digital signature integration.
 //
 // Four-step "random document" flow per EasyDo's API:
-//   1. POST /api/entity/me/forms                            -> form id (draft)
-//   2. POST /api/entity/me/forms/{id}/assignees             -> recipients
-//   3. POST /api/entity/me/forms/{id}/upload                -> base64 PDF
-//   4. PUT  /api/entity/me/forms/{id}                       -> dispatch (status: waiting)
+//   1. POST /api/entity/{ENTITY_ID}/forms                   -> form id (draft)
+//   2. POST /api/entity/{ENTITY_ID}/forms/{id}/assignees    -> recipients
+//   3. POST /api/entity/{ENTITY_ID}/forms/{id}/upload       -> base64 PDF
+//   4. PUT  /api/entity/{ENTITY_ID}/forms/{id}              -> dispatch + place
+//                                                              signature field
+// ENTITY_ID is the company/account scope. For "שיא הכרמל (חקיקת נכסים)" this
+// is 3529 — visible as `entity_id` in every form response.
 //
 // Steps 1-3 stage the form. Without step 4 the form sits at
 // status="incomplete" and never shows up in the EasyDo dashboard,
@@ -19,6 +22,7 @@
 
 const AUTH_BASE = "https://api.easydo.co.il";
 const API_BASE = "https://api.easydoc.co.il";
+const ENTITY_ID = "3529";
 
 interface TokenResponse {
   access_token: string;
@@ -193,7 +197,7 @@ export async function sendForSignature(args: {
   });
 
   // 1. Create form (as draft — step 4 dispatches it).
-  const created = (await easydoFetch("/api/entity/me/forms", {
+  const created = (await easydoFetch(`/api/entity/${ENTITY_ID}/forms`, {
     name: args.document_name,
     draft: true,
   })) as { id?: string | number; form?: { id?: string | number } };
@@ -213,7 +217,7 @@ export async function sendForSignature(args: {
     notify_platform: "email",
     recipient: true,
   }));
-  await easydoFetch(`/api/entity/me/forms/${formId}/assignees`, { assignees });
+  await easydoFetch(`/api/entity/${ENTITY_ID}/forms/${formId}/assignees`, { assignees });
   console.log("[easydo] step 2/4 assignees set", { formId, count: assignees.length });
 
   // 3. Upload PDF (base64). `mime: "application/pdf"` tells EasyDo to treat
@@ -227,7 +231,7 @@ export async function sendForSignature(args: {
     },
   };
   const uploaded = (await easydoFetch(
-    `/api/entity/me/forms/${formId}/upload`,
+    `/api/entity/${ENTITY_ID}/forms/${formId}/upload`,
     uploadBody,
     {
       redactedBody: {
@@ -273,7 +277,7 @@ export async function sendForSignature(args: {
   fieldsByPage[bgUrls[bgUrls.length - 1]] = [signatureField];
 
   await easydoFetch(
-    `/api/entity/me/forms/${formId}`,
+    `/api/entity/${ENTITY_ID}/forms/${formId}`,
     { draft: false, data: fieldsByPage },
     { method: "PUT" }
   );
