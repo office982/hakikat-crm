@@ -326,6 +326,28 @@ export async function sendForSignature(args: {
 }
 
 /**
+ * Fetch the current state of a form by id (GET /api/entity/{ENTITY_ID}/forms/{form_id}).
+ * Useful for polling status when a webhook isn't available.
+ */
+export async function getForm(formId: string | number): Promise<EasydoFormResponse> {
+  const token = await getToken();
+  const url = `${API_BASE}/api/entity/${ENTITY_ID}/forms/${formId}`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  const rawBody = await res.text();
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) tokenCache = null;
+    throw new Error(`EasyDo GET form ${formId} -> ${res.status}: ${rawBody}`);
+  }
+  return JSON.parse(rawBody) as EasydoFormResponse;
+}
+
+/**
  * Verify webhook signature from EasyDo via HMAC-SHA256.
  * Signature is expected in the `x-easydo-signature` header as a hex-encoded
  * HMAC of the raw request body with the shared secret. Falls back to `true`
