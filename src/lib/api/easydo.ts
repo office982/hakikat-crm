@@ -181,8 +181,8 @@ export interface EasydoWebhookEvent {
 }
 
 /**
- * Send a PDF for digital signature via EasyDo's three-step "random document" flow.
- * Returns the EasyDo form id, which we persist as `easydo_document_id`.
+ * Send a PDF for digital signature via EasyDo's four-step "random document"
+ * flow. Returns the EasyDo form id, which we persist as `easydo_document_id`.
  */
 export async function sendForSignature(args: {
   document_name: string;
