@@ -1,9 +1,14 @@
 // EasyDo digital signature integration.
 //
-// Three-step "random document" flow per EasyDo's API:
-//   1. POST /api/entity/me/forms                            -> form id
+// Four-step "random document" flow per EasyDo's API:
+//   1. POST /api/entity/me/forms                            -> form id (draft)
 //   2. POST /api/entity/me/forms/{id}/assignees             -> recipients
 //   3. POST /api/entity/me/forms/{id}/upload                -> base64 PDF
+//   4. PUT  /api/entity/me/forms/{id}                       -> dispatch (status: waiting)
+//
+// Steps 1-3 stage the form. Without step 4 the form sits at
+// status="incomplete" and never shows up in the EasyDo dashboard,
+// even though the assignee already has a fill_url.
 //
 // Auth is OAuth client-credentials: exchange CLIENT_ID + CLIENT_SECRET
 // for a short-lived Bearer token via /api/auth/token. The token is
@@ -121,16 +126,18 @@ async function getToken(): Promise<string> {
 async function easydoFetch(
   path: string,
   body: unknown,
-  opts?: { redactedBody?: unknown }
+  opts?: { redactedBody?: unknown; method?: "POST" | "PUT" }
 ): Promise<unknown> {
   const token = await getToken();
   const url = `${API_BASE}${path}`;
+  const method = opts?.method ?? "POST";
   console.log("[easydo] -> request", {
+    method,
     url,
     body: opts?.redactedBody ?? body,
   });
   const res = await fetch(url, {
-    method: "POST",
+    method,
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
@@ -185,45 +192,60 @@ export async function sendForSignature(args: {
     pdf_bytes: args.pdf.length,
   });
 
-  // 1. Create form
+  // 1. Create form (as draft — step 4 dispatches it).
   const created = (await easydoFetch("/api/entity/me/forms", {
     name: args.document_name,
-    draft: false,
+    draft: true,
   })) as { id?: string | number; form?: { id?: string | number } };
   const formId = String(created.id ?? created.form?.id ?? "");
   if (!formId) {
     throw new Error(`EasyDo create-form returned no id: ${JSON.stringify(created)}`);
   }
-  console.log("[easydo] step 1/3 form created", { formId });
+  console.log("[easydo] step 1/4 form created", { formId });
 
   // 2. Set recipients (temporary/random — by email).
   // `notify_platform: "email"` is required for EasyDo to actually dispatch the
   // signature link; without it the form is staged but no email is sent.
-  // `role_id: "1"` matches the single-recipient case in EasyDo's docs.
   const assignees = args.signers.map((s, i) => ({
     email: s.email,
     name: s.name,
-    role_id: "1",
     sequence: i + 1,
     notify_platform: "email",
     recipient: true,
   }));
   await easydoFetch(`/api/entity/me/forms/${formId}/assignees`, { assignees });
-  console.log("[easydo] step 2/3 assignees set", { formId, count: assignees.length });
+  console.log("[easydo] step 2/4 assignees set", { formId, count: assignees.length });
 
-  // 3. Upload PDF (base64)
+  // 3. Upload PDF (base64). `mime: "application/pdf"` tells EasyDo to treat
+  // it as a PDF form (vs. a generic attachment) so the PDF interpreter runs.
   const uploadBody = {
     file: {
       name: args.file_name || "contract.pdf",
       data: args.pdf.toString("base64"),
+      mime: "application/pdf",
     },
   };
   await easydoFetch(`/api/entity/me/forms/${formId}/upload`, uploadBody, {
     redactedBody: {
-      file: { name: uploadBody.file.name, data: `<${args.pdf.length} bytes base64>` },
+      file: {
+        name: uploadBody.file.name,
+        data: `<${args.pdf.length} bytes base64>`,
+        mime: uploadBody.file.mime,
+      },
     },
   });
-  console.log("[easydo] step 3/3 pdf uploaded", { formId });
+  console.log("[easydo] step 3/4 pdf uploaded", { formId });
+
+  // 4. Dispatch the form. Without this PUT the form sits at
+  // status="incomplete" and never appears in the EasyDo dashboard.
+  // `draft: false` is the actual dispatch trigger — it flips the form
+  // out of the draft-forms list and into the sender's main view.
+  await easydoFetch(
+    `/api/entity/me/forms/${formId}`,
+    { draft: false },
+    { method: "PUT" }
+  );
+  console.log("[easydo] step 4/4 form dispatched", { formId });
 
   return { document_id: formId };
 }
