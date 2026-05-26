@@ -16,6 +16,14 @@
 // `draft` is only accepted by the PUT update endpoint, not POST create —
 // the form starts as draft by default and step 4 flips it via `draft: false`.
 //
+// Step 4 also places the **signature field**. Without it, the recipient sees
+// only a "read & approve" link, no signable box. The `data` body field is an
+// array-of-arrays: outer index = page (0-based), inner array = field
+// placements on that page in normalized 0..1 coordinates. Field type
+// `"input-signature"` renders as the green signature box on the recipient's
+// form. We drop one onto the last page so it appears at the end of the
+// contract.
+//
 // Auth is OAuth client-credentials: exchange CLIENT_ID + CLIENT_SECRET
 // for a short-lived Bearer token via /api/auth/token. The token is
 // cached in-process until ~1 minute before expiry.
@@ -168,6 +176,16 @@ async function easydoFetch(
   }
 }
 
+// Count pages in a PDF by scanning the raw bytes for `/Type /Page` page
+// objects (excluding `/Pages`, which is the parent dictionary). Chromium-
+// generated PDFs follow this convention reliably; if a future producer
+// breaks the assumption we fall back to 1 page.
+function countPdfPages(pdf: Buffer): number {
+  const latin = pdf.toString("latin1");
+  const matches = latin.match(/\/Type\s*\/Page(?!s)/g);
+  return Math.max(1, matches?.length ?? 1);
+}
+
 export interface EasydoSigner {
   name: string;
   email?: string;
@@ -291,15 +309,34 @@ export async function sendForSignature(args: {
   );
   console.log("[easydo] step 3/4 pdf uploaded", { formId });
 
-  // 4. Dispatch the form (`draft: false`). Per EasyDo's PUT /forms/{id} spec,
-  // body fields are: name, recurring_*, data, settings, admin_*, pin,
-  // meta_data, draft — with `data` documented as null in the official example.
-  // Signature field positions are NOT placed via this endpoint; if needed,
-  // they're either pre-embedded in the PDF (AcroForm) or set through a
-  // separate EasyDo field-placement flow.
+  // 4. Dispatch the form (`draft: false`) and place a signature field on the
+  // last page. Without this placement, the recipient only sees a read &
+  // approve link — no green "sign here" box. The `data` body field is an
+  // array-of-arrays (outer index = 0-based page, inner array = placements)
+  // with normalized 0..1 coordinates. `type: "input-signature"` renders the
+  // signable box. Box is centered horizontally near the page bottom so it
+  // lands at the end of the contract regardless of body length.
+  const pageCount = countPdfPages(args.pdf);
+  const data: unknown[][] = Array.from({ length: pageCount }, () => []);
+  data[pageCount - 1].push({
+    pos_x: 0.4,
+    pos_y: 0.85,
+    width: 0.2,
+    height: 0.07,
+    name: null,
+    placeholder: null,
+    font: "Arial",
+    font_size: "16",
+    type: "input-signature",
+  });
+  console.log("[easydo] placing signature field", {
+    formId,
+    page: pageCount,
+    of: pageCount,
+  });
   await easydoFetch(
     `/api/entity/${ENTITY_ID}/forms/${formId}`,
-    { draft: false },
+    { draft: false, data },
     { method: "PUT" }
   );
   console.log("[easydo] step 4/4 form dispatched", { formId });
