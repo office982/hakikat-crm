@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { Send, CheckCircle, Clock, FileText, AlertCircle } from "lucide-react";
+import { Send, CheckCircle, Clock, FileText, AlertCircle, Copy, ExternalLink } from "lucide-react";
 import type { ContractFormData } from "../ContractWizard";
 import { renderContractHtml } from "@/lib/contract-render";
 import { createTenantFolder, uploadAndShare } from "@/lib/api/onedrive";
@@ -22,6 +22,18 @@ export function Step5Sign({ data, onChange }: Props) {
   const [error, setError] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [lastDestination, setLastDestination] = useState<CloudDestination | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const copyFillUrl = async () => {
+    if (!data.fill_url) return;
+    try {
+      await navigator.clipboard.writeText(data.fill_url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API unavailable (insecure context) — nothing to do.
+    }
+  };
 
   const runFlow = async (destination: CloudDestination) => {
     setError("");
@@ -99,6 +111,7 @@ export function Step5Sign({ data, onChange }: Props) {
         signing_status: "sent",
         easydo_document_id: sendJson.document_id,
         contract_pdf_url: sendJson.document_url,
+        fill_url: sendJson.fill_url ?? undefined,
       });
       setStep("done");
     } catch (err) {
@@ -167,6 +180,42 @@ export function Step5Sign({ data, onChange }: Props) {
                   <span className="font-medium">ממתין לחתימת הדייר</span>
                 </div>
                 <p className="text-muted"> מייל נשלח לדייר עם קישור לחתימה.</p>
+
+                {data.fill_url && (
+                  <div className="mt-3 border-t border-warning/30 pt-3">
+                    <p className="text-xs text-muted mb-2">
+                      אם הדייר לא קיבל את המייל — אפשר לשלוח לו את הקישור הזה ידנית:
+                    </p>
+                    <div className="flex items-center gap-2 bg-white rounded border border-warning/40 p-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={data.fill_url}
+                        dir="ltr"
+                        className="flex-1 bg-transparent text-xs text-gray-700 outline-none truncate"
+                        onFocus={(e) => e.currentTarget.select()}
+                      />
+                      <button
+                        type="button"
+                        onClick={copyFillUrl}
+                        className="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-primary text-white hover:bg-primary/90"
+                      >
+                        <Copy className="w-3 h-3" />
+                        {copied ? "הועתק" : "העתק"}
+                      </button>
+                      <a
+                        href={data.fill_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-primary text-primary hover:bg-primary/10"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        פתח
+                      </a>
+                    </div>
+                  </div>
+                )}
+
                 {data.contract_pdf_url && (
                   <p className="mt-2">
                     <a href={data.contract_pdf_url} target="_blank" rel="noreferrer" className="text-primary hover:underline">

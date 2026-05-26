@@ -100,6 +100,7 @@ export async function POST(
       .from("contracts")
       .update({
         easydo_document_id: easydo.document_id,
+        easydo_fill_url: easydo.fill_url ?? null,
         status: "pending_signature",
         updated_at: new Date().toISOString(),
       })

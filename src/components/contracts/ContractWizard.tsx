@@ -45,6 +45,8 @@ export interface ContractFormData {
   tenant_id?: string;
   easydo_document_id?: string;
   contract_pdf_url?: string;
+  /** EasyDo signing URL for the tenant — surfaced so the operator can share it manually if email delivery fails. */
+  fill_url?: string;
   signing_status: "pending" | "sent" | "signed";
 }
 
