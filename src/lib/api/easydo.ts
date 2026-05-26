@@ -9,9 +9,12 @@
 // ENTITY_ID is the company/account scope. For "שיא הכרמל (חקיקת נכסים)" this
 // is 3529 — visible as `entity_id` in every form response.
 //
-// Steps 1-3 stage the form. Without step 4 the form sits at
-// status="incomplete" and never shows up in the EasyDo dashboard,
-// even though the assignee already has a fill_url.
+// Steps 1-3 stage the form. Step 4 dispatches it and places fields. After
+// dispatch the form still reports status="incomplete" — that's EasyDo's
+// term for "sent, awaiting signature", not "draft". The signable state
+// lives on the assignee row: assignees[0].status="waiting" means the
+// fill_url is live. Status flips to "signed"/"completed" only after the
+// recipient signs.
 //
 // `draft` is only accepted by the PUT update endpoint, not POST create —
 // the form starts as draft by default and step 4 flips it via `draft: false`.
@@ -318,16 +321,22 @@ export async function sendForSignature(args: {
   // lands at the end of the contract regardless of body length.
   const pageCount = countPdfPages(args.pdf);
   const data: unknown[][] = Array.from({ length: pageCount }, () => []);
+  // `role: 1` binds the signature to the first assignee (role_id 1 in
+  // payload.roles). Without the binding, EasyDo leaves the form in
+  // status="incomplete" and never sets sent_date on the form — the field
+  // exists but has no signer attached, so the dispatch is a no-op.
   data[pageCount - 1].push({
     pos_x: 0.4,
     pos_y: 0.85,
     width: 0.2,
     height: 0.07,
-    name: null,
+    name: "signature",
     placeholder: null,
     font: "Arial",
     font_size: "16",
     type: "input-signature",
+    role: 1,
+    required: true,
   });
   console.log("[easydo] placing signature field", {
     formId,
