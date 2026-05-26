@@ -2,7 +2,7 @@
 
 CRM לניהול נדל״ן בעברית (RTL) — דיירים, חוזים, תשלומים, סריקת צ׳קים, פרויקטים יזמיים, התראות וסוכן AI ב־WhatsApp.
 
-הפרויקט בנוי על **Next.js 16** (App Router) + **Supabase** (Postgres) + **pg-boss** (jobs) + **Anthropic Claude** (AI), עם אינטגרציות ל־WATI, Morning/Green Invoice, iCount, EasyDo, Google Drive, OneDrive, Telegram, Twilio ו־Resend.
+הפרויקט בנוי על **Next.js 16** (App Router) + **Supabase** (Postgres) + **pg-boss** (jobs) + **Anthropic Claude** (AI), עם אינטגרציות ל־WATI, Morning/Green Invoice, iCount, EasyDo, Google Drive, OneDrive, Telegram, Twilio ו־Gmail SMTP.
 
 > ⚠️ **גרסת Next.js**: זוהי Next.js 16 — חלק מה־APIs שונים מהגרסאות שאתה מכיר. ראה [AGENTS.md](AGENTS.md) ו־`node_modules/next/dist/docs/` לפני כתיבת קוד.
 
@@ -88,7 +88,7 @@ CRON_SECRET=<random-string>
          ↓                                            ↓
 ┌──────────────────────────────────────────────────────────┐
 │ Integrations: Claude · WATI · Morning · EasyDo · Drive · │
-│ OneDrive · iCount · Telegram · Twilio · Resend           │
+│ OneDrive · iCount · Telegram · Twilio · Gmail SMTP       │
 └──────────────────────────────────────────────────────────┘
 ```
 

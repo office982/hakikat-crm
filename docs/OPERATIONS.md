@@ -106,8 +106,9 @@
 | `TWILIO_ACCOUNT_SID` | Twilio (SMS) |
 | `TWILIO_AUTH_TOKEN` | Twilio auth |
 | `TWILIO_FROM_NUMBER` | מספר השולח |
-| `RESEND_API_KEY` | Resend (Email) |
-| `RESEND_FROM_EMAIL` | כתובת השולח |
+| `SMTP_USER` | Gmail address (App Password user) |
+| `SMTP_PASS` | Gmail App Password (16 chars, no spaces) |
+| `SMTP_FROM_EMAIL` | כתובת השולח (אופציונלי — ברירת מחדל `SMTP_USER`) |
 | `ADMIN_EMAIL` | אימייל מנהל לאלרטים |
 | `ADMIN_SMS_PHONE` | טלפון מנהל ל־SMS |
 | `NEXT_PUBLIC_APP_URL` | URL ציבורי של האפליקציה (לקישורים ב־OAuth/הודעות) |
@@ -303,8 +304,13 @@ SELECT * FROM notifications WHERE delivery_status='failed' ORDER BY failed_at DE
 ### Telegram
 @BotFather בטלגרם → `/newbot` → קבל token.
 
-### Twilio / Resend
-חשבונות סטנדרטיים, מפתחות מה־dashboard.
+### Twilio
+חשבון סטנדרטי, מפתחות מה־dashboard.
+
+### Gmail SMTP
+- הפעל אימות דו־שלבי על חשבון ה־Gmail.
+- צור App Password: [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
+- הזן את הסיסמה (16 תווים, ללא רווחים) ל־`SMTP_PASS`.
 
 ---
 

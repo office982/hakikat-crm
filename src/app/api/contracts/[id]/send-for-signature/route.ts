@@ -123,11 +123,11 @@ export async function POST(
     });
 
     // Extra delivery layer: when we have the EasyDo fill_url, send it to the
-    // tenant via Resend too. Belt-and-suspenders — if EasyDo's own email
+    // tenant via Gmail SMTP too. Belt-and-suspenders — if EasyDo's own email
     // doesn't arrive (form stuck at status="incomplete", spam filtering,
     // etc.), the tenant still gets a working signing link from us.
     // Best-effort — failure here doesn't fail the request.
-    let resendResult: { ok: boolean; configured: boolean; error?: string } | null = null;
+    let emailResult: { ok: boolean; configured: boolean; error?: string } | null = null;
     if (easydo.fill_url) {
       const subject = `חוזה לחתימה דיגיטלית — ${tenant.full_name}`;
       const text =
@@ -145,18 +145,18 @@ export async function POST(
         `<p style="color:#666;font-size:13px">אם הכפתור לא עובד, העתק את הקישור הבא לדפדפן:<br><span dir="ltr">${easydo.fill_url}</span></p>` +
         `<p>בכל שאלה — אנחנו כאן.<br>קבוצת חקיקת נכסים</p>` +
         `</div>`;
-      resendResult = await sendEmail({
+      emailResult = await sendEmail({
         to: tenant.email,
         subject,
         text,
         html,
       });
-      console.log("[send-for-signature] resend dispatch", {
+      console.log("[send-for-signature] smtp dispatch", {
         contractId,
         to: tenant.email,
-        ok: resendResult.ok,
-        configured: resendResult.configured,
-        error: resendResult.error,
+        ok: emailResult.ok,
+        configured: emailResult.configured,
+        error: emailResult.error,
       });
     }
 
@@ -164,7 +164,7 @@ export async function POST(
       document_id: easydo.document_id,
       signature_sent: true,
       fill_url: easydo.fill_url ?? null,
-      resend_email_sent: resendResult?.ok ?? false,
+      email_sent: emailResult?.ok ?? false,
     });
   } catch (err) {
     console.error("send-for-signature failed", {

@@ -216,7 +216,7 @@ export interface EasydoFormResponse {
  * Send a PDF for digital signature via EasyDo's four-step "random document"
  * flow. Returns the EasyDo form id (persisted as `easydo_document_id`) and,
  * when available, the recipient's `fill_url` — the caller may use it to also
- * send the signing link via Resend, on top of EasyDo's own email dispatch.
+ * send the signing link via Gmail SMTP, on top of EasyDo's own email dispatch.
  */
 export async function sendForSignature(args: {
   document_name: string;

@@ -1,18 +1,43 @@
 /**
- * Email fallback transport.
+ * Email transport via Gmail SMTP (nodemailer).
  *
- * Uses Resend (https://resend.com) if RESEND_API_KEY is set.
- * Returns immediately when no provider is configured — caller
- * decides whether that's a failure or a no-op.
+ * Requires a Gmail App Password — generate at https://myaccount.google.com/apppasswords
+ * (the account must have 2-Step Verification enabled). Regular account passwords
+ * will be rejected by Gmail SMTP with "Application-specific password required".
+ *
+ * Env vars:
+ *   SMTP_USER       — Gmail address (e.g. alerts@hakikat.co.il)
+ *   SMTP_PASS       — 16-character App Password (no spaces)
+ *   SMTP_FROM_EMAIL — optional From header; defaults to SMTP_USER
+ *
+ * Returns immediately when not configured — the caller decides whether
+ * that's a failure or a no-op.
  */
 
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "alerts@hakikat.local";
+import nodemailer, { type Transporter } from "nodemailer";
+
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+const FROM_EMAIL = process.env.SMTP_FROM_EMAIL || SMTP_USER || "alerts@hakikat.local";
 
 export interface EmailResult {
   ok: boolean;
   configured: boolean;
   error?: string;
+}
+
+let transporter: Transporter | null = null;
+
+function getTransporter(): Transporter | null {
+  if (!SMTP_USER || !SMTP_PASS) return null;
+  if (transporter) return transporter;
+  // Gmail submission endpoint. Port 587 + STARTTLS is preferred over 465/SSL —
+  // nodemailer's `service: "gmail"` shortcut wires both correctly.
+  transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+  });
+  return transporter;
 }
 
 export async function sendEmail(params: {
@@ -21,30 +46,19 @@ export async function sendEmail(params: {
   text: string;
   html?: string;
 }): Promise<EmailResult> {
-  if (!RESEND_API_KEY) {
-    return { ok: false, configured: false, error: "RESEND_API_KEY not configured" };
+  const t = getTransporter();
+  if (!t) {
+    return { ok: false, configured: false, error: "SMTP_USER/SMTP_PASS not configured" };
   }
 
   try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: FROM_EMAIL,
-        to: params.to,
-        subject: params.subject,
-        text: params.text,
-        html: params.html,
-      }),
+    await t.sendMail({
+      from: FROM_EMAIL,
+      to: params.to,
+      subject: params.subject,
+      text: params.text,
+      html: params.html,
     });
-
-    if (!res.ok) {
-      const err = await res.text();
-      return { ok: false, configured: true, error: `Resend ${res.status}: ${err}` };
-    }
     return { ok: true, configured: true };
   } catch (err) {
     return {
