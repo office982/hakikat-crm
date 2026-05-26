@@ -276,7 +276,7 @@ export async function sendForSignature(args: {
       mime: "application/pdf",
     },
   };
-  const uploaded = (await easydoFetch(
+  await easydoFetch(
     `/api/entity/${ENTITY_ID}/forms/${formId}/upload`,
     uploadBody,
     {
@@ -288,55 +288,21 @@ export async function sendForSignature(args: {
         },
       },
     }
-  )) as { payload?: { data?: Record<string, unknown> } };
+  );
   console.log("[easydo] step 3/4 pdf uploaded", { formId });
 
-  // Extract the bg image URLs EasyDo generated from the PDF (one per page),
-  // sorted by page number. The PUT in step 4 must echo these exact keys.
-  const bgUrls = Object.keys(uploaded.payload?.data ?? {}).sort((a, b) => {
-    const pageNum = (u: string) =>
-      parseInt(u.match(/\/bg\/(\d+)\.[a-z]+$/i)?.[1] ?? "0", 10);
-    return pageNum(a) - pageNum(b);
-  });
-  if (bgUrls.length === 0) {
-    throw new Error(`EasyDo upload returned no page bg images for form ${formId}`);
-  }
-
-  // 4. Place a signature field on the last page and dispatch the form.
-  // Without at least one signable field, EasyDo keeps the form at
-  // status="incomplete" and hides it from the sender's dashboard.
-  // Coordinates are 0–1 relative to the page; field goes bottom-center.
-  const signatureField = {
-    pos_x: 0.35,
-    pos_y: 0.85,
-    width: 0.3,
-    height: 0.08,
-    name: null,
-    placeholder: null,
-    font: "Arial",
-    font_size: "16",
-    type: "input-signature",
-    role_id: "1",
-  };
-  // EasyDo's Update form expects `data` as an array of pages (each entry is
-  // the array of fields on that page), not a URL-keyed object. The URL-keyed
-  // shape appears only in GET responses. Sending the wrong shape returns 400
-  // "data is not a valid form payload data".
-  // Encode as a JSON string — the endpoint validates this as a stringified
-  // payload, raw arrays/objects are silently dropped.
-  const pageFields: object[][] = bgUrls.map(() => []);
-  pageFields[pageFields.length - 1] = [signatureField];
-
+  // 4. Dispatch the form (`draft: false`). Per EasyDo's PUT /forms/{id} spec,
+  // body fields are: name, recurring_*, data, settings, admin_*, pin,
+  // meta_data, draft — with `data` documented as null in the official example.
+  // Signature field positions are NOT placed via this endpoint; if needed,
+  // they're either pre-embedded in the PDF (AcroForm) or set through a
+  // separate EasyDo field-placement flow.
   await easydoFetch(
     `/api/entity/${ENTITY_ID}/forms/${formId}`,
-    { draft: false, data: JSON.stringify(pageFields) },
+    { draft: false },
     { method: "PUT" }
   );
-  console.log("[easydo] step 4/4 form dispatched", {
-    formId,
-    pages: bgUrls.length,
-    sig_on_page: bgUrls.length,
-  });
+  console.log("[easydo] step 4/4 form dispatched", { formId });
 
   return { document_id: formId, fill_url: fillUrl };
 }
