@@ -318,16 +318,18 @@ export async function sendForSignature(args: {
     type: "input-signature",
     role_id: "1",
   };
-  const fieldsByPage: Record<string, object[]> = {};
-  for (const url of bgUrls) fieldsByPage[url] = [];
-  fieldsByPage[bgUrls[bgUrls.length - 1]] = [signatureField];
+  // EasyDo's Update form expects `data` as an array of pages (each entry is
+  // the array of fields on that page), not a URL-keyed object. The URL-keyed
+  // shape appears only in GET responses. Sending the wrong shape returns 400
+  // "data is not a valid form payload data".
+  // Encode as a JSON string — the endpoint validates this as a stringified
+  // payload, raw arrays/objects are silently dropped.
+  const pageFields: object[][] = bgUrls.map(() => []);
+  pageFields[pageFields.length - 1] = [signatureField];
 
-  // Per EasyDo's Update form schema, `data` is typed as a JSON-encoded string
-  // (not a raw object). Sending a raw object causes the field to be silently
-  // dropped — the form stays at status="incomplete". JSON.stringify it.
   await easydoFetch(
     `/api/entity/${ENTITY_ID}/forms/${formId}`,
-    { draft: false, data: JSON.stringify(fieldsByPage) },
+    { draft: false, data: JSON.stringify(pageFields) },
     { method: "PUT" }
   );
   console.log("[easydo] step 4/4 form dispatched", {
