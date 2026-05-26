@@ -3,6 +3,7 @@ import { supabaseAdmin as supabase } from "@/lib/supabase";
 import { isEasydoConfigured, sendForSignature } from "@/lib/api/easydo";
 import { renderContractHtml } from "@/lib/contract-render";
 import { htmlToPdf } from "@/lib/pdf";
+import { sendEmail } from "@/lib/api/email";
 
 // EasyDo wants the PDF inline as base64 (3-step API). Puppeteer needs Node.
 export const runtime = "nodejs";
@@ -121,7 +122,50 @@ export async function POST(
       message: `החוזה נשלח לחתימה דיגיטלית. ממתין לחתימת הדייר.`,
     });
 
-    return NextResponse.json({ document_id: easydo.document_id, signature_sent: true });
+    // Extra delivery layer: when we have the EasyDo fill_url, send it to the
+    // tenant via Resend too. Belt-and-suspenders — if EasyDo's own email
+    // doesn't arrive (form stuck at status="incomplete", spam filtering,
+    // etc.), the tenant still gets a working signing link from us.
+    // Best-effort — failure here doesn't fail the request.
+    let resendResult: { ok: boolean; configured: boolean; error?: string } | null = null;
+    if (easydo.fill_url) {
+      const subject = `חוזה לחתימה דיגיטלית — ${tenant.full_name}`;
+      const text =
+        `שלום ${tenant.full_name},\n\n` +
+        `חוזה השכירות מוכן לחתימה דיגיטלית.\n` +
+        `לחתימה לחץ על הקישור הבא:\n\n` +
+        `${easydo.fill_url}\n\n` +
+        `בכל שאלה — אנחנו כאן.\n` +
+        `קבוצת חקיקת נכסים`;
+      const html =
+        `<div dir="rtl" style="font-family:Arial,sans-serif;font-size:15px;line-height:1.6">` +
+        `<p>שלום ${tenant.full_name},</p>` +
+        `<p>חוזה השכירות מוכן לחתימה דיגיטלית.</p>` +
+        `<p><a href="${easydo.fill_url}" style="display:inline-block;background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none">לחתימה על החוזה</a></p>` +
+        `<p style="color:#666;font-size:13px">אם הכפתור לא עובד, העתק את הקישור הבא לדפדפן:<br><span dir="ltr">${easydo.fill_url}</span></p>` +
+        `<p>בכל שאלה — אנחנו כאן.<br>קבוצת חקיקת נכסים</p>` +
+        `</div>`;
+      resendResult = await sendEmail({
+        to: tenant.email,
+        subject,
+        text,
+        html,
+      });
+      console.log("[send-for-signature] resend dispatch", {
+        contractId,
+        to: tenant.email,
+        ok: resendResult.ok,
+        configured: resendResult.configured,
+        error: resendResult.error,
+      });
+    }
+
+    return NextResponse.json({
+      document_id: easydo.document_id,
+      signature_sent: true,
+      fill_url: easydo.fill_url ?? null,
+      resend_email_sent: resendResult?.ok ?? false,
+    });
   } catch (err) {
     console.error("send-for-signature failed", {
       contractId,

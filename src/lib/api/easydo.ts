@@ -214,14 +214,16 @@ export interface EasydoFormResponse {
 
 /**
  * Send a PDF for digital signature via EasyDo's four-step "random document"
- * flow. Returns the EasyDo form id, which we persist as `easydo_document_id`.
+ * flow. Returns the EasyDo form id (persisted as `easydo_document_id`) and,
+ * when available, the recipient's `fill_url` — the caller may use it to also
+ * send the signing link via Resend, on top of EasyDo's own email dispatch.
  */
 export async function sendForSignature(args: {
   document_name: string;
   signers: EasydoSigner[];
   pdf: Buffer;
   file_name?: string;
-}): Promise<{ document_id: string }> {
+}): Promise<{ document_id: string; fill_url?: string }> {
   console.log("[easydo] sendForSignature start", {
     document_name: args.document_name,
     signers: args.signers.length,
@@ -249,8 +251,20 @@ export async function sendForSignature(args: {
     notify_platform: "email",
     recipient: true,
   }));
-  await easydoFetch(`/api/entity/${ENTITY_ID}/forms/${formId}/assignees`, { assignees });
-  console.log("[easydo] step 2/4 assignees set", { formId, count: assignees.length });
+  const assigneesRes = (await easydoFetch(
+    `/api/entity/${ENTITY_ID}/forms/${formId}/assignees`,
+    { assignees }
+  )) as { assignees?: Array<{ fill_url?: string }> };
+  // Each assignee's fill_url is generated immediately and is signable as soon
+  // as status="waiting". JSON.parse already normalizes the `\/` escapes from
+  // the raw response, so this is a clean URL like:
+  //   https://app.easydo.co.il/formfill/<slug>
+  const fillUrl = assigneesRes.assignees?.[0]?.fill_url;
+  console.log("[easydo] step 2/4 assignees set", {
+    formId,
+    count: assignees.length,
+    fill_url: fillUrl ?? "<missing>",
+  });
 
   // 3. Upload PDF (base64). `mime: "application/pdf"` tells EasyDo to treat
   // it as a PDF form (vs. a generic attachment) so the PDF interpreter runs.
@@ -322,7 +336,7 @@ export async function sendForSignature(args: {
     sig_on_page: bgUrls.length,
   });
 
-  return { document_id: formId };
+  return { document_id: formId, fill_url: fillUrl };
 }
 
 /**
