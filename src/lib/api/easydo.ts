@@ -13,6 +13,9 @@
 // status="incomplete" and never shows up in the EasyDo dashboard,
 // even though the assignee already has a fill_url.
 //
+// `draft` is only accepted by the PUT update endpoint, not POST create —
+// the form starts as draft by default and step 4 flips it via `draft: false`.
+//
 // Auth is OAuth client-credentials: exchange CLIENT_ID + CLIENT_SECRET
 // for a short-lived Bearer token via /api/auth/token. The token is
 // cached in-process until ~1 minute before expiry.
@@ -180,6 +183,35 @@ export interface EasydoWebhookEvent {
   timestamp: string;
 }
 
+// Form response shape from POST /forms, PUT /forms/{id}, GET /forms/{id}.
+// Per EasyDo API docs — only fields we actually read are required here.
+export interface EasydoFormResponse {
+  id: number;
+  entity_id: number | string;
+  name: string | null;
+  status: string;
+  admin_status?: string | null;
+  dir_hash?: string | null;
+  payload_id?: string | null;
+  payload?: { data?: Record<string, unknown> | unknown[] } | null;
+  assignees?: Array<{
+    id: number;
+    slug: string;
+    form_id: number;
+    sequence: number;
+    profile_id: number | null;
+    placeholder: string | null;
+    template_role_id: number | null;
+    public: boolean;
+    status: string;
+    notify_platform: string | null;
+    notify_notes: string | null;
+  }>;
+  files?: unknown[];
+  created_at: string;
+  updated_at: string;
+}
+
 /**
  * Send a PDF for digital signature via EasyDo's four-step "random document"
  * flow. Returns the EasyDo form id, which we persist as `easydo_document_id`.
@@ -196,12 +228,12 @@ export async function sendForSignature(args: {
     pdf_bytes: args.pdf.length,
   });
 
-  // 1. Create form (as draft — step 4 dispatches it).
+  // 1. Create form. Per docs the body is { name, meta_data? }; the form
+  // starts as draft by default and step 4 dispatches it via `draft: false`.
   const created = (await easydoFetch(`/api/entity/${ENTITY_ID}/forms`, {
     name: args.document_name,
-    draft: true,
-  })) as { id?: string | number; form?: { id?: string | number } };
-  const formId = String(created.id ?? created.form?.id ?? "");
+  })) as Partial<EasydoFormResponse>;
+  const formId = created.id ? String(created.id) : "";
   if (!formId) {
     throw new Error(`EasyDo create-form returned no id: ${JSON.stringify(created)}`);
   }
@@ -276,9 +308,12 @@ export async function sendForSignature(args: {
   for (const url of bgUrls) fieldsByPage[url] = [];
   fieldsByPage[bgUrls[bgUrls.length - 1]] = [signatureField];
 
+  // Per EasyDo's Update form schema, `data` is typed as a JSON-encoded string
+  // (not a raw object). Sending a raw object causes the field to be silently
+  // dropped — the form stays at status="incomplete". JSON.stringify it.
   await easydoFetch(
     `/api/entity/${ENTITY_ID}/forms/${formId}`,
-    { draft: false, data: fieldsByPage },
+    { draft: false, data: JSON.stringify(fieldsByPage) },
     { method: "PUT" }
   );
   console.log("[easydo] step 4/4 form dispatched", {
